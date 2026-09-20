@@ -25,3 +25,5 @@ function makeCases(){return [
  preset('BK-2213','Summit Commodities','processing',{}, {processing:true}),
  ...[['MAIL-1190','Harbor Ops','SI_REQUEST','Please prepare the SI for our next booking.'],['MAIL-1191','Meridian','INVOICE_QUERY','Please clarify the service charge on invoice INV-112.'],['MAIL-1192','Coastal Ventures','GENERAL','Please confirm tomorrow’s meeting time.'],['MAIL-1193','Promotional Sender','SPAM','A promotional offer unrelated to shipment operations.']].map(([id,company,category,body])=>preset(id,company,'noncomparison',{}, {category,body,history:[{title:'Classification complete',detail:'No SI–BL comparison was requested in this preset email.',at:'20 Sep, 10:14'}]}))
 ]}
+
+export { FIELD_KEYS, LABELS, makeCases };

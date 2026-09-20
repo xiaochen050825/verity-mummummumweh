@@ -1,0 +1,4 @@
+let connection;
+function db(){return connection??=new Promise((resolve,reject)=>{const r=indexedDB.open('verity-files',1);r.onupgradeneeded=()=>r.result.createObjectStore('files',{keyPath:'id'});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+export async function putFile(file){const d=await db(),record={id:crypto.randomUUID(),name:file.name,size:file.size,type:file.type,blob:file,added:new Date().toISOString()};await new Promise((resolve,reject)=>{const tx=d.transaction('files','readwrite');tx.objectStore('files').put(record);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});const {blob,...meta}=record;return meta}
+export async function getFile(id){const d=await db();return new Promise((resolve,reject)=>{const r=d.transaction('files').objectStore('files').get(id);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}

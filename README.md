@@ -1,43 +1,60 @@
-# Verity — interactive design prototype
+# Verity — React document review workspace
 
-English interface for MumMumMumWeh's SI / BL document review workflow. The design follows the supplied white, coral-red and pale-pink Verity references and the Chinese AI / technical reference manual.
+English SI / BL review workspace for MumMumMumWeh. White, coral red and pale pink visual system; an action-first queue and one focused issue per review.
 
-## Scope
+## Current scope
 
-This is a **preset frontend prototype**, not a live extraction or evaluation system. It contains 23 example records and the complete navigation and contextual review flows. There is no live mailbox, OCR service, model request, automatic sending or competition scoring. Sample source documents are generated fixtures and labelled as such.
+This is a complete **frontend review prototype with a sample processing sequence**. It has 23 preset cases, evidence views, issue-specific recovery, file staging, decision history, local persistence and export. It does not run live OCR, model inference or competition scoring. Uploaded files are never silently substituted with preset documents.
 
-## Run
+## Run and build
 
-Serve `dist` with any static web server, for example `python -m http.server 5178 --directory dist`, then open `http://localhost:5178`. The site also opens directly from `dist/index.html` for offline UI review (the optional Google font may fall back to Arial).
+- `npm ci`
+- `npm run dev` for the local workspace at http://127.0.0.1:5178
+- `npm test` for the comparison-state tests
+- `npm run build` produces the static React application in `dist`
+- `npm run preview` serves the production build locally
 
-Routes are hash based. Start at `#inbox`; use `#screens` to find every page and issue state. Review decisions are saved only in this browser's local storage. Reset examples restores the fixtures. Imported files are inspected and staged locally; they are not uploaded or processed.
+Source lives in `src`. The published Site retains its existing identity in `.openai/hosting.json`.
 
-## Main pages
+## Interface and motion
 
-- To do: action-first queue with search and a direct action per case.
-- All records: status filters and every email, including classification-only records.
-- Import: local file staging, basic JSON record checks, invalid-file feedback and sample batch.
-- Processing: labelled simulated stages; exceptions remain separate.
-- Document pairing: explicit SI and BL choices, blocked booking mismatch, multi-shipment escalation.
-- Field review: one issue at a time, relevant source excerpts, one primary action, and collapsed matched fields. Full-source review is shown when the location is unavailable.
-- Email: full preset message, category, entry gate and reasoning.
-- History: decisions, prior source snapshots and extraction versions.
-- Results: every email, known findings, internal JSON download and explicit competition-export blockers.
-- Page guide: navigation to all designed scenarios.
+- React owns routing, review state, forms and rendered components.
+- Motion animates tab indicators, navigation selection, field changes, expandable evidence, dialogs, saved decisions and progress.
+- Radix Dialog handles focus containment, keyboard dismissal and accessible modal semantics. Radix Tabs handles keyboard navigation between filter tabs.
+- Lucide icons and Sonner feedback are used throughout.
+- The operating system's reduced-motion preference is respected. Settings can disable motion explicitly.
+- No marketing landing page or extra sign-in screen was added.
 
-## Important behaviors
+## Complete frontend paths
 
-- A verified difference remains MISMATCH. Completing a review is not document agreement.
-- Missing, unreadable, ambiguous and processing failures are separate.
-- An uploaded file alone never marks a case resolved; only explicitly selected preset recovery material changes the demo result.
-- Numeric, company and port decisions require source evidence. They apply only to the current case.
-- A retry of the timeout fixture fails once, consumes its budget and then stops.
-- Non-comparison categories never report a seven-field pass.
-- The internal report retains every preset email. Official submission is blocked because the data is synthetic and some reason mappings are not defined.
-- SI is a reference, not proof of real-world correctness.
+1. To do: search, reason filter, sorting, pagination and direct case actions.
+2. All records: needs input / processing / completed; classification-only emails retained.
+3. Import: drag/drop and picker, JSON validation, ZIP entry checks, local file persistence, separate imported workspace.
+4. Example processing: visible simulated stages, pause, resume after reload and completion.
+5. Pairing: explicit SI and BL choices with booking mismatch exclusions.
+6. Review: issue switcher, source excerpts, full sources, zoom, download, missing materials, unreadable scans, numeric interpretation, identity and port questions, extraction correction, manual full-source review and bounded timeout retry.
+7. Recovery: one relevant primary action; defer with a note; explicitly labelled sample material can resolve a sample issue. Actual uploads remain pending until processed.
+8. History: decisions, evidence notes and previous source versions.
+9. Export: JSON detail or CSV summary, preview and all records retained. Competition submission is explicitly unavailable.
+10. Settings: reduced motion, queue density, review export and reset only the example cases.
 
-## Technical boundaries
+## Data boundaries
 
-No dependencies or build step are required. `dist/data.js` owns fixtures, `dist/app.js` owns shared state and evidence rules, `dist/experience.js` owns the action-first screens, and the two CSS files own tokens and responsive layouts. Hash routes work on static hosting. Optional WebMCP read/navigation tools are feature-detected; unsupported browsers continue normally. These tools do not modify field findings.
+Example and imported workspaces are separate. Decisions are saved in localStorage (`verity-workspace-v3`); original uploaded Blobs are retained in IndexedDB (`verity-files`). This is browser-local storage, not cloud synchronization. Previous `verity-demo-v1` decisions migrate on first load. Importing uses a 50 MB limit per file; ZIP archives are inspected for entry names but not interpreted as extracted shipment fields.
 
-Real backend work remains: original document storage and evidence coordinates, full-message classification, independent extraction, bounded visual reread, versioned field parsers, validated result adapters, authentication if needed, and measured evaluation on the actual bundle.
+Imported emails keep their full text and are visibly unprocessed. Manual email classification is available; document extraction and automated comparisons for real imports remain a backend integration task. An upload alone cannot change a field result. No API keys are stored in the browser.
+
+## Decision invariants
+
+- Verified differences remain MISMATCH, including in exports.
+- Missing, unreadable, ambiguous, pairing and service failures remain distinct.
+- Human interpretation needs a source reference and applies only to this case.
+- Original evidence and prior versions remain available after correction.
+- Missing files and processing failures never become seven-field matches.
+- Timeout retries are limited to one for unchanged material.
+- Non-comparison emails export `fields: null`.
+- SI is a comparison reference, not proof of real-world shipment correctness.
+
+## Backend integration remaining
+
+Connect the designed pipeline: keyword gate on the subject/full body, full-message intent classification, format-aware native readers, OCR for scans, independent seven-field extraction, immediate rule validation, one source-image reread for suspicious recognition, field-specific comparison, evidence coordinates and the validated competition output adapter. Validate performance and review time on the real dataset before claiming accuracy or savings.
