@@ -6,13 +6,15 @@ export function competitionOutput(cases,expectedIds=cases.map(c=>c.emailId||c.id
  for(const c of cases){const id=c.emailId||c.id,fields=Object.values(c.fields||{}),diff=KEYS.filter(k=>c.fields?.[k]?.comparison==='MISMATCH'),unknown=fields.filter(f=>f.comparison===null);let reason=null;
   if(c.demo||c.classificationPending||c.processingError||c.pairIssue||c.multiple||!c.pipeline)reason='Example, unclassified, unprocessed, failed, or unpaired case.';
   else if(c.category!=='BL_COMPARISON')reason='Official status placeholder for classification-only emails needs confirmation.';
-  else if(diff.length&&unknown.length)reason='Mixed differences and unresolved fields need an official mapping.';
-  else if(fields.some(f=>f.scope_warning))reason='Address/scope warning needs official mapping.';
+  else if(!diff.length&&fields.some(f=>f.scope_warning))reason='Address/scope warning needs official mapping.';
   if(reason){blocked.push({email_id:id,reason});continue}
-  let reviewReason=c.docIssue==='wrong_type'?'wrong_doc_type':['missing_si','missing_bl'].includes(c.docIssue)?'missing_attachment':null;
-  if(!reviewReason&&unknown.length){const reasons=new Set(unknown.map(f=>f.kind==='MISSING'?'missing_value':f.kind==='UNREADABLE'?'unreadable':null));if(reasons.size===1&&!reasons.has(null))reviewReason=[...reasons][0];else {blocked.push({email_id:id,reason:'Ambiguity or multiple review reasons have no confirmed official mapping.'});continue}}
+  let reviewReason=null;
+  if(!diff.length){
+   reviewReason=c.docIssue==='wrong_type'?'wrong_doc_type':['missing_si','missing_bl'].includes(c.docIssue)?'missing_attachment':null;
+   if(!reviewReason&&unknown.length){const reasons=new Set(unknown.map(f=>f.kind==='MISSING'?'missing_value':f.kind==='UNREADABLE'?'unreadable':null));if(reasons.size===1&&!reasons.has(null))reviewReason=[...reasons][0];else {blocked.push({email_id:id,reason:'Ambiguity or multiple review reasons have no confirmed official mapping.'});continue}}
+  }
   if(!reviewReason&&fields.length!==7){blocked.push({email_id:id,reason:'Seven checked fields are required.'});continue}
-  output[id]={category:c.category,status:reviewReason?'NEEDS_REVIEW':diff.length?'MISMATCH':'OK',review_reason:reviewReason,has_defect:diff.length>0,defect_fields:diff};
+  output[id]={category:c.category,status:diff.length?'MISMATCH':reviewReason?'NEEDS_REVIEW':'OK',review_reason:reviewReason,has_defect:diff.length>0,defect_fields:diff};
  }
  return {ready:blocked.length===0&&Object.keys(output).length===expectedIds.length,blocked,output};
 }
