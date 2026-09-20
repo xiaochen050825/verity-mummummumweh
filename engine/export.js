@@ -5,7 +5,10 @@ export function competitionOutput(cases,expectedIds=cases.map(c=>c.emailId||c.id
  for(const id of expectedIds)if(!ids.includes(id))blocked.push({email_id:id,reason:'Missing email result.'});
  for(const c of cases){const id=c.emailId||c.id,fields=Object.values(c.fields||{}),diff=KEYS.filter(k=>c.fields?.[k]?.comparison==='MISMATCH'),unknown=fields.filter(f=>f.comparison===null);let reason=null;
   if(c.demo||c.classificationPending||c.processingError||c.pairIssue||c.multiple||!c.pipeline)reason='Example, unclassified, unprocessed, failed, or unpaired case.';
-  else if(c.category!=='BL_COMPARISON')reason='Official status placeholder for classification-only emails needs confirmation.';
+  else if(c.category!=='BL_COMPARISON'||c.classificationOnly){
+   output[id]={category:c.category,status:'OK',review_reason:null,has_defect:false,defect_fields:[]};
+   continue;
+  }
   else if(!diff.length&&fields.some(f=>f.scope_warning))reason='Address/scope warning needs official mapping.';
   if(reason){blocked.push({email_id:id,reason});continue}
   let reviewReason=null;

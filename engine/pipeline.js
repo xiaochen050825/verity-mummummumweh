@@ -9,9 +9,14 @@ export async function runPipeline(original,documents,env={},options={}){
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
   const classification=c.classification&&(options.keepCategory||c.classification.provider===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
-  c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
-  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
-  if(c.classificationPending){stage('review');return c}
+ c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
+ event(c,'Email routed',classification.reason+' ['+classification.provider+']');
+ if(c.classificationPending){stage('review');return c}
+  // A request to send a draft BL has no comparison evidence yet. The request can
+  // be classified as handled without ever claiming that seven fields matched.
+  const current=(c.subject+'\n'+(c.body||'').split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0]);
+  c.classificationOnly=c.category==='BL_COMPARISON'&&!documents.length&&!(c.attachments||[]).length&&/\b(?:assist\s+to\s+)?(?:send|provide|share|forward)\s+(?:us\s+)?(?:the\s+)?(?:draft\s+)?(?:b\/?l|bill of lading)\b/i.test(current)&&!/\b(?:compare|verify|check)\b/i.test(current);
+  if(c.classificationOnly){c.fields={};stage('complete');event(c,'Request classified','Draft BL requested; no SI/BL comparison was performed.');return c}
   if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete');return c}
   stage('extracting');const extracted=[];
   for(const doc of documents){
