@@ -1,3 +1,3 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-export default defineConfig({plugins:[react()],build:{outDir:'dist',emptyOutDir:true},server:{strictPort:true},preview:{strictPort:true}});
+export default defineConfig({plugins:[react()],build:{outDir:'dist/client',emptyOutDir:true},server:{strictPort:true,proxy:{'/api':'http://127.0.0.1:8788'}},preview:{strictPort:true}});

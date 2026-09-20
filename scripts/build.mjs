@@ -1,0 +1,13 @@
+import {build as viteBuild} from 'vite';
+import {build} from 'esbuild';
+import {cp,mkdir,rm,readdir} from 'node:fs/promises';
+await rm('dist',{recursive:true,force:true});
+await mkdir('public/ocr/core',{recursive:true});
+await cp('node_modules/tesseract.js/dist/worker.min.js','public/ocr/worker.min.js');
+for(const f of await readdir('node_modules/tesseract.js-core'))if(/\.wasm(?:\.js)?$/.test(f))await cp('node_modules/tesseract.js-core/'+f,'public/ocr/core/'+f);
+await cp('node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz','public/ocr/eng.traineddata.gz');
+await viteBuild();
+await build({entryPoints:['server/index.js'],outfile:'dist/server/index.js',bundle:true,format:'esm',platform:'browser',target:'es2022',minify:true});
+await mkdir('dist/.openai',{recursive:true});
+await cp('.openai/hosting.json','dist/.openai/hosting.json');
+await cp('drizzle','dist/.openai/drizzle',{recursive:true});

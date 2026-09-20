@@ -1,60 +1,60 @@
-# Verity — React document review workspace
+# Verity — evidence-linked shipping document review
 
-English SI / BL review workspace for MumMumMumWeh. White, coral red and pale pink visual system; an action-first queue and one focused issue per review.
+React / Motion workspace for MumMumMumWeh. The existing white/coral interface is preserved. Real imports now use a server processing pipeline, D1 records and R2 originals; example cases remain clearly separate and browser-local.
 
-## Current scope
+## Run locally
 
-This is a complete **frontend review prototype with a sample processing sequence**. It has 23 preset cases, evidence views, issue-specific recovery, file staging, decision history, local persistence and export. It does not run live OCR, model inference or competition scoring. Uploaded files are never silently substituted with preset documents.
+1. `npm ci`
+2. `npm run build`
+3. `npx wrangler d1 migrations apply verity-local --local`
+4. `npm run dev:server` (local Worker at 127.0.0.1:8788)
+5. `npm run dev` (React at 127.0.0.1:5178)
+6. `npm test`
 
-## Run and build
+`npm run build` emits `dist/server/index.js`, `dist/client` assets and Sites metadata/migrations. Deploy using Sites, not Wrangler deploy. Production logical bindings are DB and BUCKET. LOCAL_DEV exists only in local Wrangler configuration, never the hosted manifest.
 
-- `npm ci`
-- `npm run dev` for the local workspace at http://127.0.0.1:5178
-- `npm test` for the comparison-state tests
-- `npm run build` produces the static React application in `dist`
-- `npm run preview` serves the production build locally
+## Current processing
 
-Source lives in `src`. The published Site retains its existing identity in `.openai/hosting.json`.
+- Native PDF text with page coordinates; scanned PDF pages and PNG/JPEG use self-hosted English Tesseract OCR in the browser. Raster pages, originals, hashes and OCR text are retained. DOCX paragraphs/tables and XLSX sheets/cells use native ZIP/XML readers. TXT is supported. TIFF and legacy Office formats stop explicitly; they are not mislabelled as successfully read.
+- Reading runs in the user's browser; classification, extraction, validation, comparison, review actions and persistence run on the Worker. This avoids putting OCR WASM into the Worker's 128 MB budget. A closed browser stops a new batch's not-yet-submitted work; persisted records can be resumed from each case.
+- Default provider is **local-rules**, a conservative labelled-field parser and intent heuristic, not an AI model. It reads real submitted content; it never substitutes fixture outputs. General/unclear requests need manual category confirmation. Keyword routing checks the complete subject/body, SI/BL token boundaries and Chinese equivalents; quoted old requests are screened by the local heuristic.
+- The replaceable API provider performs full-message classification, independent SI/BL extraction and a single targeted visual reread round per document. Prompts treat source content as data, not instructions. Strict schemas, grounded quotes, page and label checks run before comparison. A malformed response has one schema-only repair. Unchanged transient failures have one user-triggered retry; no infinite loops.
+- Only unique SI/BL pairs with matching booking references compare automatically. Multiple versions, unknown references and conflicts require explicit review. File names never establish document identity. Attachment association uses JSON names; unlinked files require explicit selection.
+- Original sources never change. New decisions preserve previous values, actor scope, timestamps and evidence. Reviewer confirmation of a mismatch retains MISMATCH.
 
-## Interface and motion
+## Rules matching the technical HTML
 
-- React owns routing, review state, forms and rendered components.
-- Motion animates tab indicators, navigation selection, field changes, expandable evidence, dialogs, saved decisions and progress.
-- Radix Dialog handles focus containment, keyboard dismissal and accessible modal semantics. Radix Tabs handles keyboard navigation between filter tabs.
-- Lucide icons and Sonner feedback are used throughout.
-- The operating system's reduced-motion preference is respected. Settings can disable motion explicitly.
-- No marketing landing page or extra sign-in screen was added.
+`engine/rules.js`, `engine/provider.js`, `engine/pipeline.js` and `engine/export.js` implement the contract from `../work/technical-content.html`.
 
-## Complete frontend paths
+- Seven fields: shipper, consignee, notify_party, port_of_loading, port_of_discharge, container_count, gross_weight_kg.
+- MATCH / MISMATCH / null are distinct from MISSING / UNREADABLE / AMBIGUOUS and processing failures.
+- Missing extraction is not missing source content: unlocated fields remain UNREADABLE. Labelled blanks or N/A can be MISSING. Net-weight evidence cannot validate gross weight.
+- Numbers use string/BigInt decimal arithmetic, exact comparison and explicit `unset` or `en_comma` source profiles with evidence. No inferred locale or tolerance. Metric units and finite English number words are supported. Zero weight is allowed; negative weight and nonpositive/noninteger container counts block comparison. `6 × 40 HC` is six containers.
+- Ports use a bounded, versioned mapping. Unknown names remain unresolved even when both raw strings agree; name/code conflicts block normalization. Mapping coverage is intentionally limited.
+- Entity names and qualifiers are preserved. Explicit structured addresses are separate: one-sided addresses do not change name-scope equality; conflicting bilateral addresses block automatic completion with a scope warning. No fuzzy-company auto-matching.
+- Quality records include source checks, grammar checks and not-applicable markers for total/business checks without verified scope. No assumed per-container weights or invented business ranges. Arbitrary freight-table totals are not inferred by the local parser.
+- One targeted visual round uses the original page images, never the opposite document's value. Successful extractions cache by original hash and provider/prompt version. Changed source profiles reparse without model re-extraction.
+- Human judgments are case-specific and never silently become global aliases. Unknown answers can stay unresolved.
+- Internal export retains all cases. Official export is blocked for undefined mappings (mixed difference/unknown, multiple reasons, noncomparison status placeholders, multi-shipment and scope warnings); no GENERAL/OK fill-in. Diagnostic counts separate service failures from data problems, with the HTML's provisional 50-case/30% diagnostic trigger and up-to-10 automatic-pass review candidates. Candidate order is deterministic; this is a review list, not an unbiased statistical sample.
 
-1. To do: search, reason filter, sorting, pagination and direct case actions.
-2. All records: needs input / processing / completed; classification-only emails retained.
-3. Import: drag/drop and picker, JSON validation, ZIP entry checks, local file persistence, separate imported workspace.
-4. Example processing: visible simulated stages, pause, resume after reload and completion.
-5. Pairing: explicit SI and BL choices with booking mismatch exclusions.
-6. Review: issue switcher, source excerpts, full sources, zoom, download, missing materials, unreadable scans, numeric interpretation, identity and port questions, extraction correction, manual full-source review and bounded timeout retry.
-7. Recovery: one relevant primary action; defer with a note; explicitly labelled sample material can resolve a sample issue. Actual uploads remain pending until processed.
-8. History: decisions, evidence notes and previous source versions.
-9. Export: JSON detail or CSV summary, preview and all records retained. Competition submission is explicitly unavailable.
-10. Settings: reduced motion, queue density, review export and reset only the example cases.
+## AI API handoff
 
-## Data boundaries
+Set server-only production secrets through Sites:
 
-Example and imported workspaces are separate. Decisions are saved in localStorage (`verity-workspace-v3`); original uploaded Blobs are retained in IndexedDB (`verity-files`). This is browser-local storage, not cloud synchronization. Previous `verity-demo-v1` decisions migrate on first load. Importing uses a 50 MB limit per file; ZIP archives are inspected for entry names but not interpreted as extracted shipment fields.
+- `AI_BASE_URL`: HTTPS OpenAI-compatible base, e.g. ending in `/v1`.
+- `AI_MODEL`: exact model identifier; vision support is needed for original-page rereads.
+- `AI_API_KEY`: secret bearer key.
 
-Imported emails keep their full text and are visibly unprocessed. Manual email classification is available; document extraction and automated comparisons for real imports remain a backend integration task. An upload alone cannot change a field result. No API keys are stored in the browser.
+Local development uses ignored `.dev.vars` with these same names. Never use a VITE_ prefix or put keys in browser storage. Without all three values the provider remains visibly `local-rules`. The live external provider has not been validated against a real key; contract/caching/reread behavior is tested with injected transport responses. A noncompatible API needs one provider adapter change, not a pipeline rewrite.
 
-## Decision invariants
+## Persistence and authorization
 
-- Verified differences remain MISMATCH, including in exports.
-- Missing, unreadable, ambiguous, pairing and service failures remain distinct.
-- Human interpretation needs a source reference and applies only to this case.
-- Original evidence and prior versions remain available after correction.
-- Missing files and processing failures never become seven-field matches.
-- Timeout retries are limited to one for unchanged material.
-- Non-comparison emails export `fields: null`.
-- SI is a comparison reference, not proof of real-world shipment correctness.
+D1 owns batch/case/file metadata; R2 owns original bytes and page images. Every API query scopes records to the authenticated Sites user. Same-origin writes, file access checks and optimistic revisions prevent cross-user reads and stale edits. No key appears in the frontend. Local examples/settings remain local; old local imports are preserved, not silently migrated to cloud.
 
-## Backend integration remaining
+## Deliberate limits
 
-Connect the designed pipeline: keyword gate on the subject/full body, full-message intent classification, format-aware native readers, OCR for scans, independent seven-field extraction, immediate rule validation, one source-image reread for suspicious recognition, field-specific comparison, evidence coordinates and the validated competition output adapter. Validate performance and review time on the real dataset before claiming accuracy or savings.
+25 MB/file; 30 pages/sheets; 1000 emails and 1500 files/batch; ZIP expansion bounded at 150 MB; document text bounded at 500k characters; case evidence JSON bounded at 1.5M characters. Unsupported or excessive input produces an actionable error, not fabricated output. English OCR is currently packaged. No autonomous mailbox access, notifications, ERP updates or automatic source correction. No benchmark accuracy or time-saving claims: real dataset validation and official mapping clarification remain necessary before competition submission.
+
+## Verification
+
+Run `npm test` for comparison boundaries, extraction contracts, pairing, profile grammar, entity scope, target reread limits, export gates and prior frontend state invariants. Browser integration additionally verifies actual image OCR, PDF/DOCX/XLSX reading, cloud-backed review, reload/cross-session persistence, ownership isolation and stale-write rejection. Test fixtures are synthetic and are not accuracy benchmarks.

@@ -1,0 +1,5 @@
+export async function api(path,options={}){const response=await fetch('/api'+path,{...options,headers:{...(options.body instanceof FormData?{}:{'Content-Type':'application/json'}),...options.headers}});const data=await response.json();if(!response.ok)throw Error(data.error||'Workspace request failed.');return data}
+export async function uploadFile(file){const form=new FormData();form.append('file',file);return api('/files',{method:'POST',body:form})}
+export async function cloudFile(file){const response=await fetch('/api/files/'+encodeURIComponent(file.id));if(!response.ok)throw Error('The stored original could not be loaded.');return new File([await response.blob()],file.name,{type:file.type})}
+export const saveAction=(c,action,payload)=>api('/cases/'+encodeURIComponent(c.id)+'/actions',{method:'POST',body:JSON.stringify({revision:c.revision,action,payload})});
+export const processCase=(c,documents,extra={})=>api('/cases/'+encodeURIComponent(c.id)+'/process',{method:'POST',body:JSON.stringify({revision:c.revision,documents,...extra})});

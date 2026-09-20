@@ -1,0 +1,4 @@
+import {sqliteTable,text,integer,index} from 'drizzle-orm/sqlite-core';
+export const batches=sqliteTable('batches',{id:text('id').primaryKey(),owner:text('owner').notNull(),data:text('data').notNull(),created:text('created').notNull()},t=>[index('batches_owner').on(t.owner)]);
+export const cases=sqliteTable('cases',{id:text('id').primaryKey(),owner:text('owner').notNull(),batchId:text('batch_id').notNull(),data:text('data').notNull(),revision:integer('revision').notNull().default(1)},t=>[index('cases_owner_batch').on(t.owner,t.batchId)]);
+export const files=sqliteTable('files',{id:text('id').primaryKey(),owner:text('owner').notNull(),name:text('name').notNull(),type:text('type').notNull(),size:integer('size').notNull(),sha256:text('sha256').notNull(),data:text('data').notNull()},t=>[index('files_owner').on(t.owner)]);

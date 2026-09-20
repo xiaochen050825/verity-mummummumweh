@@ -1,11 +1,17 @@
 import {FIELD_KEYS,LABELS,makeCases} from './fixtures.js';
 export {FIELD_KEYS,LABELS};
 export const CATEGORIES={BL_COMPARISON:'BL comparison',SI_REQUEST:'SI request',INVOICE_QUERY:'Invoice query',GENERAL:'General',SPAM:'Spam'};
-export const countFields=c=>({match:Object.values(c.fields||{}).filter(f=>f.comparison==='MATCH').length,diff:Object.values(c.fields||{}).filter(f=>f.comparison==='MISMATCH').length,unresolved:Object.values(c.fields||{}).filter(f=>f.comparison===null).length});
-export const pending=c=>FIELD_KEYS.filter(k=>c.fields?.[k]&&(c.fields[k].comparison===null||c.fields[k].comparison==='MISMATCH'&&!c.fields[k].verified));
-export function mode(c){if(c.processing)return 'processing';if(c.processingError||c.docIssue||c.pairIssue||c.classificationPending)return 'needs';if(c.category!=='BL_COMPARISON')return 'complete';return pending(c).length?'needs':'complete'}
-export function issue(c,k){return c.processingError||c.docIssue||(c.pairIssue?'pairing':null)||(c.fields[k].comparison==='MATCH'?'match':c.fields[k].comparison==='MISMATCH'?'mismatch':c.fields[k].reason)||'evidence_not_located'}
+export const countFields=c=>({match:Object.values(c.fields||{}).filter(f=>f.comparison==='MATCH'&&!f.scope_warning).length,diff:Object.values(c.fields||{}).filter(f=>f.comparison==='MISMATCH').length,unresolved:Object.values(c.fields||{}).filter(f=>f.comparison===null||f.scope_warning).length});
+export const pending=c=>FIELD_KEYS.filter(k=>c.fields?.[k]&&(c.fields[k].scope_warning||c.fields[k].comparison===null||c.fields[k].comparison==='MISMATCH'&&!c.fields[k].verified));
+export function mode(c){if(c.processing)return 'processing';if(c.processingError||c.docIssue||c.pairIssue||c.classificationPending||Object.values(c.fields||{}).some(f=>f.scope_warning))return 'needs';if(c.category!=='BL_COMPARISON')return 'complete';return pending(c).length?'needs':'complete'}
+export function issue(c,k){return c.processingError||c.docIssue||(c.pairIssue?'pairing':null)||c.fields[k].scope_warning||(c.fields[k].comparison==='MATCH'?'match':c.fields[k].comparison==='MISMATCH'?'mismatch':c.fields[k].reason)||'evidence_not_located'}
 export const ISSUE={
+ processing_failed:{title:'Processing stopped',body:'Open Processing & original files for the failed stage and recovery details.',label:'Add source material',action:'support'},
+ weight_unit_or_value:{title:'Confirm the weight and its unit',body:'The weight cannot be interpreted uniquely.',label:'Review source evidence',action:'resolve'},
+ unit_absent:{title:'The weight unit is missing',body:'Add a source that explicitly states the unit.',label:'Add supporting material',action:'support'},
+ negative_weight:{title:'The weight is negative',body:'Check the source and obtain corrected information.',label:'Add corrected information',action:'support'},
+ extraction_ambiguous:{title:'Multiple field values were found',body:'Use the original to determine the intended value.',label:'Review source evidence',action:'resolve'},
+ address_conflict:{title:'The company addresses disagree',body:'The name agrees, but the address needs your review.',label:'Review company evidence',action:'resolve'},
  missing_value:{title:'SI is missing this value',body:'Add source information before comparing this field.',label:'Add supporting material',action:'support'},
  missing_si:{title:'Add the missing SI',body:'This case needs one SI and one BL.',label:'Upload SI',action:'support'},
  missing_bl:{title:'Add the missing BL',body:'The SI is ready. Add its matching draft BL.',label:'Upload BL',action:'support'},
@@ -67,7 +73,7 @@ export function updateCase(original,action,p={}){
  }
  return c;
 }
-export function buildReport(cases,batches){return {report_type:'internal_review',generated_at:new Date().toISOString(),scope:'Document comparison; SI is a reference, not verified shipment truth.',contains_demo_data:cases.some(c=>c.demo),batches:batches.map(b=>({id:b.id,name:b.name,demo:b.demo,count:cases.filter(c=>c.batchId===b.id).length})),cases:cases.map(c=>({email_id:c.id,category:c.category,classification_pending:!!c.classificationPending,demo:!!c.demo,batch_id:c.batchId,progress:mode(c),deferred:!!c.deferred,finding:finding(c),version:c.version,fields:c.category==='BL_COMPARISON'?c.fields:null,document_issue:c.docIssue||null,pair_issue:!!c.pairIssue,processing_error:c.processingError||null,retries:c.retries||0,source_versions:c.sourceVersions||[],source_documents:c.docs||[],supporting_files:c.supportFiles||[],history:c.history}))}}
+export function buildReport(cases,batches){return {report_type:'internal_review',generated_at:new Date().toISOString(),scope:'Document comparison; SI is a reference, not verified shipment truth.',contains_demo_data:cases.some(c=>c.demo),batches:batches.map(b=>({id:b.id,name:b.name,demo:b.demo,count:cases.filter(c=>c.batchId===b.id).length})),cases:cases.map(c=>({email_id:c.id,category:c.category,classification_pending:!!c.classificationPending,demo:!!c.demo,batch_id:c.batchId,progress:mode(c),deferred:!!c.deferred,finding:finding(c),version:c.version,fields:c.category==='BL_COMPARISON'?c.fields:null,document_issue:c.docIssue||null,pair_issue:!!c.pairIssue,processing_error:c.processingError||null,processing_detail:c.processingDetail||null,pipeline:c.pipeline||null,classification:c.classification||null,retries:c.retries||0,source_versions:c.sourceVersions||[],source_documents:c.docs||[],supporting_files:c.supportFiles||[],history:c.history}))}}
 export function csvReport(cases){const cell=v=>{const text=String(v??'');return '"'+(/^[\s]*[=+@-]/.test(text)?"'":'')+text.replaceAll('"','""')+'"'};return [['Email ID','Company','Category','Progress','Finding','Demo'],...cases.map(c=>[c.id,c.company,c.category,mode(c),finding(c),c.demo?'Yes':'No'])].map(row=>row.map(cell).join(',')).join('\r\n')}
 export function download(name,content,type='application/json'){const u=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),2000)}
 export function exportReady(cases){return !cases.some(c=>c.demo||c.classificationPending||mode(c)!=='complete')}
