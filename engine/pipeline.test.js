@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {KEYS,normalizeField,compareDocuments,number} from './rules.js';
-import {keywordGate,localExtract,localClassify,makeProvider} from './provider.js';
+import {keywordGate,localExtract,localClassify,makeProvider,providerStatus} from './provider.js';
 import {runPipeline,reviewAction} from './pipeline.js';
 import {competitionOutput,diagnostics} from './export.js';
 export const text=(type,count='3',weight='22000 KG')=>`${type}\nBooking Reference: BK-200\nShipper: Oceanic Traders Ltd\nConsignee: Harbor Imports\nNotify party: Harbor Imports\nPort of loading: Singapore (SGSIN)\nPort of discharge: Los Angeles (USLAX)\nContainer count: ${count}\nGross weight: ${weight}`;
@@ -18,6 +18,36 @@ test('a missing extraction location is unreadable, not a made-up missing fact',a
 test('multiple revisions, booking conflicts and misleading filenames do not auto-pair',async()=>{let c=await runPipeline(base(),[doc('SHIPPING INSTRUCTIONS'),doc('SHIPPING INSTRUCTIONS','4',undefined,'revision'),doc('BILL OF LADING')]);assert.equal(c.pairIssue,true);const a=doc('BILL OF LADING');a.pages[0].text=a.pages[0].text.replace('BK-200','OTHER');c=await runPipeline(base(),[doc('SHIPPING INSTRUCTIONS'),a]);assert.equal(c.pairIssue,true);const fake={id:'invoice',name:'BL.pdf',pages:[{page:1,text:'INVOICE\nGross weight: 22000 KG',method:'native'}]};c=await runPipeline(base(),[doc('SHIPPING INSTRUCTIONS'),fake]);assert.equal(c.docIssue,'wrong_type')});
 test('source corrections and semantic manual decisions retain an audit trail',async()=>{let c=await runPipeline(base(),[doc('SHIPPING INSTRUCTIONS',undefined,'22.000 MT'),doc('BILL OF LADING')]);c=reviewAction(c,'resolve',{field:'gross_weight_kg',siValue:'22.000 MT',blValue:'22000 KG',decision:'MATCH',note:'SI page 1: sender specification uses a decimal point.'});assert.equal(c.fields.gross_weight_kg.manual,true);assert.equal(c.sourceVersions.length>0,true)});
 test('API output schema rejects hallucinated structure and prompt data stays untrusted',async()=>{const env={AI_API_KEY:'test',AI_BASE_URL:'https://test.example/v1',AI_MODEL:'test'};const p=makeProvider(env,async()=>Response.json({choices:[{message:{content:'{"madeUp":true}'}}]}));await assert.rejects(()=>p.extract(doc('SHIPPING INSTRUCTIONS')),/contract/)});
+test('Grafilab uses the account console endpoint and the selected vision model only for images',async()=>{
+ const env={GRAFILAB_API_KEY:'test',GRAFILAB_MODEL:'gemini/gemini-3.5-flash-lite',GRAFILAB_VISION_MODEL:'gemini/gemini-3.6-flash'};
+ const seen=[],fetcher=async(url,opts)=>{seen.push({url,model:JSON.parse(opts.body).model});const result=localExtract(doc('SHIPPING INSTRUCTIONS'));delete result.provider;return Response.json({choices:[{message:{content:JSON.stringify(result)}}]})};
+ const p=makeProvider(env,fetcher);await p.extract(doc('SHIPPING INSTRUCTIONS'));await p.reread(doc('SHIPPING INSTRUCTIONS'),['shipper'],'data:image/png;base64,dGVzdA==');
+ assert.deepEqual(seen,[{url:'https://llm.grafilab.ai/v1/chat/completions',model:env.GRAFILAB_MODEL},{url:'https://llm.grafilab.ai/v1/chat/completions',model:env.GRAFILAB_VISION_MODEL}]);
+});
+test('Grafilab can retry without JSON mode when a model rejects that request option',async()=>{
+ const formats=[],fetcher=async(_url,opts)=>{const body=JSON.parse(opts.body);formats.push(!!body.response_format);if(body.response_format)return new Response('',{status:400});const result=localExtract(doc('SHIPPING INSTRUCTIONS'));delete result.provider;return Response.json({choices:[{message:{content:JSON.stringify(result)}}]})};
+ const provider=makeProvider({GRAFILAB_API_KEY:'test'},fetcher);assert.equal((await provider.extract(doc('SHIPPING INSTRUCTIONS'))).type,'SI');assert.deepEqual(formats,[true,false]);
+});
+test('Jev routes email only, with low confidence or weak comparison intent sent to review',async()=>{
+ const env={TYPESAFE_API_KEY:'test'};assert.deepEqual(providerStatus(env),{mode:'local-rules',model:null,visionModel:null,ocrModel:null,routing:'jev',extraction:'local-rules'});
+ const calls=[],fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body)});return Response.json({answers:{category:{choice:'BL_COMPARISON',confidence:0.93},compare_intent:{noul:0.92}}})};
+ const p=makeProvider(env,fetcher),email={subject:'Please check our draft BL',body:'Attached SI and BL. Please compare them.'};
+ const routed=await p.classify(email);assert.equal(routed.category,'BL_COMPARISON');assert.equal(routed.needsReview,false);assert.equal(routed.provider,'jev');assert.equal(calls[0].url,'https://api.typesafe.ai/v1/systemone');assert.equal(calls[0].body.model,'jev-latest');
+ const low=makeProvider(env,async()=>Response.json({answers:{category:{choice:'BL_COMPARISON',confidence:0.93},compare_intent:{noul:0.3}}}));assert.equal((await low.classify(email)).needsReview,true);
+});
+test('low-confidence scanned page uses Grafilab OCR once and keeps the browser transcript',async()=>{
+ const env={GRAFILAB_API_KEY:'test',GRAFILAB_MODEL:'gemini/gemini-3.5-flash-lite',GRAFILAB_OCR_MODEL:'grafilab/glm-ocr'};
+ const si=doc('SHIPPING INSTRUCTIONS'),bl=doc('BILL OF LADING');si.pages[0]={page:1,text:'SHIPPING INSTRUCTIONS\nBooking Reference: BK-200\nShipper: ?\nGross weight: ??',method:'ocr',confidence:42,imageId:'si-page'};
+ let ocrCalls=0,extractCalls=0;
+ const fetcher=async(url,opts)=>{const request=JSON.parse(opts.body);
+  if(request.model==='grafilab/glm-ocr'){ocrCalls++;return Response.json({choices:[{message:{content:text('SHIPPING INSTRUCTIONS')}}]})}
+  if(request.messages[0].content.includes('BL_COMPARISON requires'))return Response.json({choices:[{message:{content:JSON.stringify({category:'BL_COMPARISON',quote:'Please check the draft BL against the SI.',reason:'Explicit request',needsReview:false})}}]});
+  extractCalls++;const source=JSON.parse(request.messages[1].content[0].text),result=localExtract(source);delete result.provider;
+  return Response.json({choices:[{message:{content:JSON.stringify(result)}}]})};
+ const opts={fetcher,getPageImage:async()=> 'data:image/png;base64,dGVzdA=='};
+ let checked=await runPipeline(base(),[si,bl],env,opts);assert.equal(checked.pipeline.status,'complete');assert.equal(checked.docs[0].pages[0].ocrEngine,'grafilab/glm-ocr');assert.match(checked.docs[0].pages[0].browserOcrText,/Shipper: \?/);assert.equal(ocrCalls,1);assert.equal(checked.pipeline.rereads,1);assert.equal(extractCalls,3);
+ checked=await runPipeline(checked,[si,bl],env,opts);assert.equal(checked.pipeline.status,'complete');assert.equal(ocrCalls,1);assert.equal(extractCalls,3);
+});
 test('official export reports a known difference while retaining unresolved fields internally',async()=>{const c=await runPipeline(base(),[doc('SHIPPING INSTRUCTIONS','3','N/A'),doc('BILL OF LADING','4')]);const result=competitionOutput([c]);assert.equal(result.ready,true);assert.deepEqual(result.output['email-1'],{category:'BL_COMPARISON',status:'MISMATCH',review_reason:null,has_defect:true,defect_fields:['container_count']});assert.equal(c.fields.gross_weight_kg.kind,'MISSING');assert.equal(competitionOutput([{...c,category:'GENERAL'}]).ready,false);assert.equal(diagnostics([c]).attempted,1)});
 test('entity scope preserves one-sided addresses and blocks conflicting addresses',async()=>{
  const si=doc('SHIPPING INSTRUCTIONS'),bl=doc('BILL OF LADING');si.pages[0].text=si.pages[0].text.replace('Oceanic Traders Ltd','Oceanic Traders Ltd\n88 Industrial Road');let c=await runPipeline(base(),[si,bl]);assert.equal(c.fields.shipper.comparison,'MATCH');bl.pages[0].text=bl.pages[0].text.replace('Oceanic Traders Ltd','Oceanic Traders Ltd\n99 Harbour Road');c=await runPipeline(base(),[si,bl]);assert.equal(c.fields.shipper.comparison,'MATCH');assert.equal(c.fields.shipper.scope_warning,'address_conflict');assert.equal(c.pipeline.status,'review');assert.equal(competitionOutput([c]).ready,false)

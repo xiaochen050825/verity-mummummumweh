@@ -15,7 +15,7 @@ React / Motion workspace for MumMumMumWeh. The existing white/coral interface is
 
 ## Current processing
 
-- Native PDF text with page coordinates; scanned PDF pages and PNG/JPEG use self-hosted English Tesseract OCR in the browser. Raster pages, originals, hashes and OCR text are retained. DOCX paragraphs/tables and XLSX sheets/cells use native ZIP/XML readers. TXT is supported. TIFF and legacy Office formats stop explicitly; they are not mislabelled as successfully read.
+- Native PDF text with page coordinates; scanned PDF pages and PNG/JPEG use self-hosted English Tesseract OCR in the browser. With Grafilab enabled, low-confidence scans get one GLM OCR transcript before field extraction; suspect fields can then get one targeted Gemini visual reread. Browser OCR text, model OCR text, raster pages and originals are retained separately. DOCX paragraphs/tables and XLSX sheets/cells use native ZIP/XML readers. TXT is supported. TIFF and legacy Office formats stop explicitly; they are not mislabelled as successfully read.
 - Reading runs in the user's browser; classification, extraction, validation, comparison, review actions and persistence run on the Worker. This avoids putting OCR WASM into the Worker's 128 MB budget. A closed browser stops a new batch's not-yet-submitted work; persisted records can be resumed from each case.
 - Default provider is **local-rules**, a conservative labelled-field parser and intent heuristic, not an AI model. It reads real submitted content; it never substitutes fixture outputs. General/unclear requests need manual category confirmation. Keyword routing checks the complete subject/body, SI/BL token boundaries and Chinese equivalents; quoted old requests are screened by the local heuristic.
 - The replaceable API provider performs full-message classification, independent SI/BL extraction and a single targeted visual reread round per document. Prompts treat source content as data, not instructions. Strict schemas, grounded quotes, page and label checks run before comparison. A malformed response has one schema-only repair. Unchanged transient failures have one user-triggered retry; no infinite loops.
@@ -41,11 +41,12 @@ React / Motion workspace for MumMumMumWeh. The existing white/coral interface is
 
 Set server-only production secrets through Sites:
 
-- `AI_BASE_URL`: HTTPS OpenAI-compatible base, e.g. ending in `/v1`.
-- `AI_MODEL`: exact model identifier; vision support is needed for original-page rereads.
-- `AI_API_KEY`: secret bearer key.
+- `GRAFILAB_API_KEY`: secret bearer key. This enables Grafilab at the account console's `https://llm.grafilab.ai/v1` endpoint. Default text and vision model: `gemini/gemini-3.5-flash-lite`; low-confidence scan OCR: `grafilab/glm-ocr`.
+- Optional `GRAFILAB_MODEL`, `GRAFILAB_VISION_MODEL`, `GRAFILAB_OCR_MODEL` override those exact model IDs after testing. The 3.5 Flash Lite and GLM OCR read synthetic text/image correctly in the Grafilab Playground; this is not a real dataset accuracy result.
+- Optional `TYPESAFE_API_KEY`: separate TypeSafe account key for Jev email routing (`jev-latest`). Grafilab credits cannot pay for Jev. Without it, Grafilab handles email intent if configured; otherwise local rules route emails.
+- Generic fallback: `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` for another HTTPS OpenAI-compatible provider when Grafilab is not configured.
 
-Local development uses ignored `.dev.vars` with these same names. Never use a VITE_ prefix or put keys in browser storage. Without all three values the provider remains visibly `local-rules`. The live external provider has not been validated against a real key; contract/caching/reread behavior is tested with injected transport responses. A noncompatible API needs one provider adapter change, not a pipeline rewrite.
+Local development uses ignored `.dev.vars` with these same names. Never use a VITE_ prefix or put keys in browser storage. Production has no AI key until a secret is installed in Sites; local rules remain active meanwhile. API compatibility and accuracy on the competition bundle require a live smoke test and held-out evaluation after key installation. The first paid import processes at most ten emails; the rest remain saved and can be processed case by case. Do not claim the 520-email ZIP was evaluated just because it was parsed.
 
 ## Persistence and authorization
 

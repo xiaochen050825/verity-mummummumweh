@@ -5,22 +5,29 @@ export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
  c.version=(c.version||0)+1;c.fields=blankFields();c.docIssue=null;c.processingError=null;c.pairIssue=false;c.deferred=false;
- c.pipeline={status:'classifying',provider:provider.status.mode,model:provider.status.model,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
+ c.pipeline={status:'classifying',provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
-  const classification=c.classification&&(options.keepCategory||c.classification.provider===provider.status.mode)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
+  const classification=c.classification&&(options.keepCategory||c.classification.provider===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
   c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
-  event(c,'Email routed',classification.reason+' ['+provider.status.mode+']');
+  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
   if(c.classificationPending){stage('review');return c}
   if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete');return c}
   stage('extracting');const extracted=[];
   for(const doc of documents){
    if(doc.readError){extracted.push({...doc,side:null,fields:{},type:'UNREADABLE'});continue}
-   const providerKey=provider.status.mode+'/'+(provider.status.model||'parser')+'/extract-1';
+   const providerKey=provider.status.extraction+'/'+(provider.status.model||'parser')+'/'+(provider.status.ocrModel||'browser-ocr')+'/extract-2';
    const cached=original.docs?.find(d=>d.id===doc.id&&d.sha256===doc.sha256&&d.fields&&d.providerKey===providerKey);
-   const result=cached||await provider.extract(doc);const full=doc.pages.map(p=>p.text).join('\n');
+   const reading=cached?{...doc,pages:cached.pages}:structuredClone(doc);
+   if(!cached&&provider.status.ocrModel&&options.getPageImage)for(const page of reading.pages){
+    if(page.method!=='ocr'||(page.confidence??100)>=85&&page.text.trim().length>=80)continue;
+    const image=await options.getPageImage(reading,page);if(!image)continue;
+    const transcript=await provider.ocrPage(image);
+    if(transcript){page.browserOcrText=page.text;page.text=transcript;page.ocrEngine=provider.status.ocrModel}
+   }
+   const result=cached||await provider.extract(reading);const full=reading.pages.map(p=>p.text).join('\n');
    const booking=result.booking&&result.bookingQuote&&norm(full).includes(norm(result.bookingQuote))&&norm(result.bookingQuote).includes(norm(result.booking))?result.booking:null;
-   extracted.push({...doc,...result,pages:doc.pages,booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,providerKey});c.docs=[...extracted];
+   extracted.push({...reading,...result,pages:reading.pages,booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,providerKey});c.docs=[...extracted];
   }
   c.docs=extracted;stage('pairing');const si=extracted.filter(d=>d.side==='si'),bl=extracted.filter(d=>d.side==='bl');
   let a,b;if(options.pair){a=si.find(d=>d.id===options.pair.si);b=bl.find(d=>d.id===options.pair.bl);if(!a||!b)throw Error('Choose one SI and one BL.');if(a.booking&&b.booking&&a.booking!==b.booking)throw Error('The chosen files have different booking references.');if((!a.booking||!b.booking)&&!options.pair.note?.trim())throw Error('Missing booking references need a pairing reason.')}

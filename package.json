@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 5178",
     "build": "node scripts/build.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5178",
-    "test": "node --test src/model.test.js engine/*.test.js",
+    "test": "node --test src/*.test.js engine/*.test.js",
     "dev:server": "wrangler dev --ip 127.0.0.1 --port 8788"
   },
   "dependencies": {
