@@ -14,11 +14,12 @@ Routes are hash based. Start at `#inbox`; use `#screens` to find every page and 
 
 ## Main pages
 
-- Inbox: filters, search, issue type and linked detail panel.
+- To do: action-first queue with search and a direct action per case.
+- All records: status filters and every email, including classification-only records.
 - Import: local file staging, basic JSON record checks, invalid-file feedback and sample batch.
 - Processing: labelled simulated stages; exceptions remain separate.
 - Document pairing: explicit SI and BL choices, blocked booking mismatch, multi-shipment escalation.
-- Field review: seven fields, synchronized source position, issue-specific action panel.
+- Field review: one issue at a time, relevant source excerpts, one primary action, and collapsed matched fields. Full-source review is shown when the location is unavailable.
 - Email: full preset message, category, entry gate and reasoning.
 - History: decisions, prior source snapshots and extraction versions.
 - Results: every email, known findings, internal JSON download and explicit competition-export blockers.
@@ -37,6 +38,6 @@ Routes are hash based. Start at `#inbox`; use `#screens` to find every page and 
 
 ## Technical boundaries
 
-No dependencies or build step are required. `dist/data.js` owns fixtures, `dist/app.js` owns shared state and UI, and `dist/styles.css` owns tokens and responsive layouts. Hash routes work on static hosting. Optional WebMCP read/navigation tools are feature-detected; unsupported browsers continue normally. These tools do not modify field findings.
+No dependencies or build step are required. `dist/data.js` owns fixtures, `dist/app.js` owns shared state and evidence rules, `dist/experience.js` owns the action-first screens, and the two CSS files own tokens and responsive layouts. Hash routes work on static hosting. Optional WebMCP read/navigation tools are feature-detected; unsupported browsers continue normally. These tools do not modify field findings.
 
 Real backend work remains: original document storage and evidence coordinates, full-message classification, independent extraction, bounded visual reread, versioned field parsers, validated result adapters, authentication if needed, and measured evaluation on the actual bundle.
