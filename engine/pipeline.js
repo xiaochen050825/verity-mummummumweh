@@ -39,6 +39,12 @@ export async function runPipeline(original,documents,env={},options={}){
    }
   }
   stage('comparing');c.fields=compareDocuments(a,b,{si:a.numberProfile,bl:b.numberProfile});
+  // Recompute dependent values, but retain independent decisions on unchanged evidence.
+  const samePair=original.pair?.si===a.id&&original.pair?.bl===b.id;
+  if(samePair)for(const key of KEYS){const old=original.fields?.[key],fresh=c.fields[key];
+   const profilesChanged=key==='gross_weight_kg'&&[a,b].some(d=>(original.docs?.find(x=>x.id===d.id)?.numberProfile||'unset')!==d.numberProfile);
+   if(old&&!profilesChanged&&old.sourceSI===fresh.sourceSI&&old.sourceBL===fresh.sourceBL){if(old.manual)c.fields[key]={...fresh,...old};else if(old.verified&&fresh.comparison==='MISMATCH')fresh.verified=true}
+  }
   c.pipeline.finishedAt=new Date().toISOString();stage(Object.values(c.fields).every(f=>f.comparison==='MATCH'&&!f.scope_warning)?'complete':'review');
   event(c,'Seven fields checked',`Rules ${RULE_VERSION}; independent ${provider.status.mode} extraction. Original evidence retained.`);
  }catch(e){c.processingError=['AI_TRANSIENT','TimeoutError'].includes(e.code||e.name)?'service_timeout':'processing_failed';c.processingDetail=e.message;c.pipeline.failedStage=c.pipeline.status;stage('failed');event(c,'Processing failed',e.message)}
