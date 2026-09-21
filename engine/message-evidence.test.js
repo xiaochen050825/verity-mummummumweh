@@ -13,6 +13,13 @@ test('current attachment declaration bridges the SI booking and BL number with q
  // The comparison fields deliberately differ: pairing never examines them.
  si.fields={shipper:{raw:'ALPHA'}};bl.fields={shipper:{raw:'BETA'}};assert.equal(automaticPairEvidence(si,bl,ctx).ok,true);
 });
+test('the current email can explicitly pair its only typed SI and BL without a shared identifier',()=>{
+ const {si,bl,ctx}=setup();
+ assert.equal(automaticPairEvidence(si,bl,{...ctx,subject:'Please check the attached documents',body:'Attached are the SI and draft BL. Please check the details and confirm.'}).method,'current_email_explicit_pair_declaration');
+ assert.equal(automaticPairEvidence(si,bl,{...ctx,subject:'Please check',body:'Attached are the SI and draft BL for OC 5ABC-12345. Please check.'}).ok,true);
+ assert.equal(automaticPairEvidence(si,bl,{...ctx,subject:'Please check',body:'Attached are the SI and draft BL for ZX900123. Please check.'}).ok,true);
+ assert.equal(automaticPairEvidence(si,bl,{...ctx,subject:'Please check',body:'Attached are the SI and draft BL for ZX900124. Please check.'}).ok,false);
+});
 test('co-occurrences, quoted threads, conflicting references and extra documents do not bridge',()=>{
  const {si,bl,ctx}=setup();
  for(const body of ['Please compare ZX900123 and CARRIER777890.','Attached are invoices for ZX900123.','Attached are SI and BL for ZX900124.','Attached are SI and BL for ZX900123.\nDo not use these files.','Hello\nFrom: old sender\n'+ctx.body,'Hello\n> '+ctx.body])assert.equal(automaticPairEvidence(si,bl,{...ctx,body}).ok,false,body);

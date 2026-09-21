@@ -48,7 +48,9 @@ async function worker(){while(index<records.length){
   // legacy browser OCR text so scanned pages are freshly read by GLM OCR.
   for(const page of d.pages||[])if(page.method==='ocr'&&!page.ocrEngine){page.text='';delete page.blocks;delete page.confidence;}
   const path=resolve(work,'bundle',id);if(!path.startsWith(resolve(work,'bundle')+'\\'))throw Error('Attachment outside input directory');
-  const sha256=digest(path);if(d.sha256&&sha256!==d.sha256)throw Error('Original source hash changed');return {...d,sha256};
+  const sha256=digest(path);if(d.sha256&&sha256!==d.sha256)throw Error('Original source hash changed');
+  if(/\.pdf$/i.test(d.name)&&!d.readerEvidence)d.readerEvidence={format:'pdf',nativeTextChecked:true,pages:(d.pages||[]).map(p=>({page:p.page,nativeTextChars:p.method==='native'?p.text.replace(/\s/g,'').length:0,rasterImages:p.method==='ocr'?1:0})),reader:'frozen-source-inspection',sha256};
+  return {...d,sha256};
  });
  const result=await runPipeline(previous||{id:email.email_id,emailId:email.email_id,subject:email.subject,body:email.body,attachments:email.attachments||[],history:[],fields:{},docs:[],version:1},docs,env,{fetcher,getPageImage:async(doc,page)=>{
   if(!/\.pdf$/i.test(doc.name))return null;

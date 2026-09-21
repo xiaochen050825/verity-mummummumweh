@@ -11,12 +11,16 @@ test('strict supported number grammars distinguish ambiguous separators without 
  assert.equal(parseNumber('21.577','de_dot').value,'21577');
  assert.equal(parseNumber('21.577','en_comma').value,'21.577');
 });
-test('all combinations must agree; identical ambiguous text is never an automatic match',()=>{
+test('all combinations must agree, while identical source tokens prove document agreement',()=>{
  assert.equal(invariantNumericComparison(parseNumber('21,577'),parseNumber('21,577')),null);
+ assert.equal(invariantNumericComparison(parseNumber('21,577'),parseNumber('21,577'),true),'MATCH');
  assert.equal(invariantNumericComparison(parseNumber('21,577'),parseNumber('22,577')),'MISMATCH');
  assert.equal(invariantNumericComparison(parseNumber('21,577'),parseNumber('21577')),null);
  assert.equal(invariantNumericComparison(parseNumber('21.5'),parseNumber('21,5')),'MATCH');
- assert.equal(compareDocuments(doc('21,577 KG'),doc('21,577 KG')).gross_weight_kg.comparison,null);
+ assert.equal(compareDocuments(doc('21,577 KG'),doc('21,577 KG')).gross_weight_kg.comparison,'MATCH');
+ const omittedUnit=doc('21,577 KG');omittedUnit.fields.gross_weight_kg.raw='21,577';
+ assert.equal(compareDocuments(omittedUnit,doc('21,577 KG')).gross_weight_kg.comparison,'MATCH');
+ assert.equal(compareDocuments(doc('21,577 KG'),doc('21.577 KG')).gross_weight_kg.comparison,null);
  const f=compareDocuments(doc('21,577 KG'),doc('22,577 KG')).gross_weight_kg;
  assert.equal(f.comparison,'MISMATCH');assert.equal(f.kind,null);assert.deepEqual(f.issues,[]);
  assert.equal(f.numeric_candidates.si.length,2);

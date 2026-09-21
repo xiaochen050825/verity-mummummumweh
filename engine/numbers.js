@@ -32,9 +32,14 @@ export function parseNumber(raw,profile='unset',factor='1'){
  if(candidates.length>1)return {ok:false,kind:'AMBIGUOUS',reason:'separator_ambiguous',candidates};
  return {ok:true,value:candidates[0].value,candidates};
 }
-export function invariantNumericComparison(a,b){
+export function invariantNumericComparison(a,b,identicalSource=false){
  const permitted=x=>x.ok||x.reason==='separator_ambiguous';
  if(!permitted(a)||!permitted(b)||!a.candidates?.length||!b.candidates?.length)return null;
+ // The numeric magnitude may remain unknown while document agreement is
+ // provable: identical source tokens with identical converted candidate sets
+ // mean SI and BL state the same thing under every supported interpretation.
+ const values=x=>[...new Set(x.candidates.map(c=>c.value))].sort();
+ if(identicalSource&&JSON.stringify(values(a))===JSON.stringify(values(b)))return 'MATCH';
  const outcomes=new Set(a.candidates.flatMap(x=>b.candidates.map(y=>x.value===y.value?'MATCH':'MISMATCH')));
  return outcomes.size===1?[...outcomes][0]:null;
 }

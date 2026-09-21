@@ -14,6 +14,7 @@ const sourceCodeHashes=Object.fromEntries(readdirSync(resolve('engine')).filter(
 for(const file of readdirSync(join(input,'cases')).filter(f=>f.endsWith('.json')).sort()){
  inputCaseHashes[file]=hash(readFileSync(join(input,'cases',file)));
  const before=JSON.parse(readFileSync(join(input,'cases',file),'utf8'));
+ for(const doc of before.docs||[])if(/\.pdf$/i.test(doc.name)&&!doc.readerEvidence)doc.readerEvidence={format:'pdf',nativeTextChecked:true,pages:(doc.pages||[]).map(p=>({page:p.page,nativeTextChars:p.method==='native'?p.text.replace(/\s/g,'').length:0,rasterImages:p.method==='ocr'?1:0})),reader:'frozen-source-inspection',sha256:doc.sha256};
  let c=before;
  // Failed or incomplete model responses require a real provider retry. Never
  // substitute invented extraction results for those cases during this replay.

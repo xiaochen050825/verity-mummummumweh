@@ -12,13 +12,22 @@ export function messagePairEvidence(si,bl,refsSI,refsBL,context){
  if(!context.documents.some(d=>d.id===si.id&&d.side==='si')||!context.documents.some(d=>d.id===bl.id&&d.side==='bl'))return null;
  const subject=String(context.subject||''),body=currentMessage(context.body);
  if(/^(?:fw|fwd)\s*[:_]/i.test(subject)||/\b(?:wrong|unrelated|ignore|superseded|cancelled|canceled|previous version|old version|reference only|do not|don't|not attached|not the)\b/i.test(subject+'\n'+body))return null;
- if(refsSI.booking.length!==1||refsBL.bl.length!==1)return null;
- const booking=refsSI.booking[0],bill=refsBL.bl[0];
+ const lines=body.split(/\r?\n/).filter(line=>line.length<=700&&/\b(?:attached|enclosed)\b/i.test(line)&&/\b(?:SI|shipping instructions?)\b/i.test(line)&&/\b(?:B\/?L|bill of lading)\b/i.test(line));
+ if(lines.length!==1)return null;
+ const booking=refsSI.booking.length===1?refsSI.booking[0]:null,bill=refsBL.bl.length===1?refsBL.bl[0]:null;
  // Both anchors must be independently located in the current email. An
  // arbitrary co-occurrence or a quoted older thread is insufficient.
- if(!token(subject,bill.value))return null;
- const lines=body.split(/\r?\n/).filter(line=>line.length<=700&&/\b(?:attached|enclosed)\b/i.test(line)&&/\b(?:SI|shipping instructions?)\b/i.test(line)&&/\b(?:B\/?L|bill of lading)\b/i.test(line));
  const anchors=lines.flatMap(line=>[...line.matchAll(/\bfor\s+(?:(?:booking reference|booking no\.?|booking number|booking)\s*[:#]?\s*)?([A-Z0-9][A-Z0-9-]{3,})\b/gi)].filter(m=>/\d/.test(m[1])).map(m=>({value:m[1].toUpperCase(),quote:line})));
- if(anchors.length!==1||anchors[0].value!==booking.value)return null;
- return {ok:true,method:'current_email_attachment_link',matches:[{kind:'email_link',value:booking.value+' → '+bill.value,si:booking,bl:bill,email:{subject,quote:anchors[0].quote}}],note:'The current email identifies the attached SI/BL for the SI booking; its subject identifies the BL. Exactly one SI and one BL, with no conflicting source references.'};
+ if(booking&&bill&&token(subject,bill.value)&&anchors.length===1&&anchors[0].value===booking.value)return {ok:true,method:'current_email_attachment_link',matches:[{kind:'email_link',value:booking.value+' → '+bill.value,si:booking,bl:bill,email:{subject,quote:anchors[0].quote}}],note:'The current email identifies the attached SI/BL for the SI booking; its subject identifies the BL. Exactly one SI and one BL, with no conflicting source references.'};
+ // A current, unquoted attachment declaration is direct evidence about the
+ // only typed SI and BL in this email. If it names a booking-like value, that
+ // value must agree with the SI; OC/order wording is a different reference type.
+ const explicitBooking=lines.flatMap(line=>[...line.matchAll(/\bfor\s+(?:(?:booking reference|booking no\.?|booking number|booking)\s*[:#]?\s*)?([A-Z0-9][A-Z0-9-]{3,})\b/gi)].filter(m=>/\d/.test(m[1])&&!/^OC$/i.test(m[1])).map(m=>m[1].toUpperCase()));
+ if(explicitBooking.length>1)return null;
+ if(explicitBooking.length===1&&booking&&explicitBooking[0]!==booking.value)return null;
+ if(bill&&!token(subject,bill.value)){
+  const subjectRefs=(subject.toUpperCase().match(/[A-Z0-9][A-Z0-9-]{5,}/g)||[]).filter(v=>/\d/.test(v));
+  if(subjectRefs.some(v=>v.includes(bill.value)||bill.value.includes(v)))return null;
+ }
+ return {ok:true,method:'current_email_explicit_pair_declaration',matches:[{kind:'current_email_declaration',value:'one SI + one BL',email:{subject,quote:lines[0]}}],note:'The current, unquoted email explicitly declares the only identified SI and BL as its attachments, with no conflict or supersession wording.'};
 }
