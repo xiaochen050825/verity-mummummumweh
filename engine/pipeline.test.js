@@ -62,7 +62,7 @@ test('requesting a draft BL without attachments is classification only, while an
 test('entity scope preserves one-sided addresses and blocks conflicting addresses',async()=>{
  const si=doc('SHIPPING INSTRUCTIONS'),bl=doc('BILL OF LADING');si.pages[0].text=si.pages[0].text.replace('Oceanic Traders Ltd','Oceanic Traders Ltd\n88 Industrial Road');let c=await runPipeline(base(),[si,bl]);assert.equal(c.fields.shipper.comparison,'MATCH');bl.pages[0].text=bl.pages[0].text.replace('Oceanic Traders Ltd','Oceanic Traders Ltd\n99 Harbour Road');c=await runPipeline(base(),[si,bl]);assert.equal(c.fields.shipper.comparison,'MATCH');assert.equal(c.fields.shipper.scope_warning,'address_conflict');assert.equal(c.pipeline.status,'review');assert.equal(competitionOutput([c]).ready,false)
 });
-test('generic role labels do not create company defects, but an order-of relationship remains material',()=>{
+test('company headings stay outside values, but an in-value order relationship remains material',()=>{
  const si=doc('SHIPPING INSTRUCTIONS'),bl=doc('BILL OF LADING');
  si.pages[0].text=si.pages[0].text.replace('Shipper:','Shipper/Exporter:');
  bl.pages[0].text=bl.pages[0].text.replace('Shipper:','Shipper (Principal or Seller):').replace('Consignee:','Consignee (Non-Negotiable):');
@@ -70,7 +70,9 @@ test('generic role labels do not create company defects, but an order-of relatio
  a.fields.shipper.entity.qualifier='Exporter';b.fields.shipper.entity.qualifier='Principal or Seller';b.fields.consignee.entity.qualifier='Non-Negotiable';
  let checked=compareDocuments(a,b);assert.equal(checked.shipper.comparison,'MATCH');assert.equal(checked.consignee.comparison,'MATCH');
  bl.pages[0].text=bl.pages[0].text.replace('Consignee (Non-Negotiable):','To the Order of:');const ordered={...bl,...localExtract(bl)};
- checked=compareDocuments(a,ordered);assert.equal(checked.consignee.comparison,'MISMATCH');
+ checked=compareDocuments(a,ordered);assert.equal(checked.consignee.comparison,'MATCH');
+ bl.pages[0].text=bl.pages[0].text.replace('To the Order of: Harbor Imports','Consignee: TO THE ORDER OF Harbor Imports');
+ checked=compareDocuments(a,{...bl,...localExtract(bl)});assert.equal(checked.consignee.comparison,'MISMATCH');
 });
 test('visual recovery is one targeted round, independent and cached',async()=>{
  let visualCalls=0,extractCalls=0;const env={AI_API_KEY:'test',AI_BASE_URL:'https://test.example/v1',AI_MODEL:'model-1'};

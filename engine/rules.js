@@ -1,5 +1,5 @@
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.0';
+export const RULE_VERSION='verity-rules-1.1';
 export const PORT_VERSION='ports-curated-1';
 // Deliberately bounded lookup. Unlisted locations require human evidence.
 const PORTS={SGSIN:['SINGAPORE'],MYPKG:['PORT KLANG','PORT KELANG'],USLAX:['LOS ANGELES'],USPDX:['PORTLAND OREGON','PORTLAND OR'],AUPTJ:['PORTLAND VICTORIA','PORTLAND VIC'],CNSHA:['SHANGHAI'],CNNGB:['NINGBO'],CNNTG:['NANTONG'],HKHKG:['HONG KONG'],NLRTM:['ROTTERDAM'],PECLL:['CALLAO'],PKKHI:['KARACHI'],SIKOP:['KOPER'],TRMER:['MERSIN']};
@@ -27,7 +27,7 @@ export function normalizeField(key,raw,profile='unset'){
  }
  if(key==='container_count'){
   if(/^\d+$/.test(s)){const n=number(s);return n.ok&&n.value!=='0'?good(n.value):fail('AMBIGUOUS','invalid_container_count')}
-  if(/^\d+\s*[x×]\s*(?:20|40|45)\s*['’]?\s*(?:HC|HQ|GP|DC|RF|FT)?$/i.test(s)){const count=s.match(/^\d+/)[0];return BigInt(count)>0n?good(BigInt(count).toString()):fail('AMBIGUOUS','invalid_container_count')}
+  if(/^\d+\s*[x×]\s*(?:20|40|45)\s*['’/]?\s*(?:HC|HQ|GP|DC|RF|FT|FCL)?$/i.test(s)){const count=s.match(/^\d+/)[0];return BigInt(count)>0n?good(BigInt(count).toString()):fail('AMBIGUOUS','invalid_container_count')}
   const units=['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'];
   const words=s.toUpperCase().split(/[- ]/);let n=units.indexOf(words[0]);if(words.length===1&&n>0)return good(String(n));
   const tens=['TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'];const t=tens.indexOf(words[0]),u=units.indexOf(words[1]);if(t>=0&&(words.length===1||words.length===2&&u>0&&u<10))return good(String((t+2)*10+(words.length===2?u:0)));
@@ -59,15 +59,28 @@ export function validateEvidence(field,doc,key){
 export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
  return Object.fromEntries(KEYS.map(key=>{
   const a=si.fields[key],b=bl.fields[key],av=validateEvidence(a,si,key),bv=validateEvidence(b,bl,key);
-  const entityRaw=f=>{if(!f?.entity)return f?.raw;const q=norm(f.entity.qualifier);return f.entity.name+(/\b(?:TO THE ORDER OF|ON BEHALF OF|AS AGENT FOR|CARE OF)\b/i.test(q)?' '+q:'')};
+  // Compare the source value, not a model's potentially truncated entity name.
+  // A labelled heading is not part of raw; relationships inside raw are retained.
+  const entityRaw=f=>{
+   let raw=norm(f?.raw);
+   // Some extractions include the heading in raw. Strip only a heading that
+   // begins the source quote too; "Consignee: TO THE ORDER OF X" is a value.
+   if(key==='consignee'&&/^TO THE ORDER OF\s*[:：]/i.test(raw)&&norm(f.quote).startsWith(raw))raw=raw.replace(/^TO THE ORDER OF\s*[:：]\s*/i,'');
+   const address=norm(f?.entity?.address);
+   return address&&raw.endsWith(address)?raw.slice(0,-address.length).trim():raw;
+  };
   const entityField=['shipper','consignee','notify_party'].includes(key);
   let x=av.ok?normalizeField(key,entityField?entityRaw(a):a.raw,profiles.si):av,y=bv.ok?normalizeField(key,entityField?entityRaw(b):b.raw,profiles.bl):bv;
   // A literal cross-reference may only resolve to a validated consignee in the same document.
   const reference=(doc,f,profile)=>{if(key==='notify_party'&&/^SAME AS CONSIGNEE$/i.test(norm(f?.raw))){const c=doc.fields.consignee;return validateEvidence(c,doc).ok?normalizeField('consignee',c.raw,profile):fail('AMBIGUOUS','entity_identity')}return null};
   if(av.ok)x=reference(si,a,profiles.si)||x;if(bv.ok)y=reference(bl,b,profiles.bl)||y;
+  // Identical validated company blocks cannot become different through splitting.
+  // Cross-references must first resolve within each document, never by raw equality.
+  const sameEntitySource=entityField&&av.ok&&bv.ok&&x.ok&&y.ok&&norm(a.raw)===norm(b.raw)&&!/^SAME AS CONSIGNEE$/i.test(norm(a.raw));
+  if(sameEntitySource){x=good(name(a.raw));y=good(name(b.raw))}
   const bad=!x.ok?x:!y.ok?y:null;
   let comparison=bad?null:x.value===y.value?'MATCH':'MISMATCH',reason=bad?.reason||null,kind=bad?.kind||null;
-  const scopeWarning=entityField&&a?.entity?.address&&b?.entity?.address&&name(a.entity.address)!==name(b.entity.address)?'address_conflict':null;
+  const scopeWarning=!sameEntitySource&&entityField&&a?.entity?.address&&b?.entity?.address&&name(a.entity.address)!==name(b.entity.address)?'address_conflict':null;
   const qa=[{rule:'source_evidence',version:RULE_VERSION,status:av.ok&&bv.ok?'pass':'flag'},{rule:'field_grammar',status:bad?'flag':'pass'},{rule:'detail_totals',status:'not_applicable',reason:'No verified complete detail-total relationship provided.'},{rule:'business_range',status:'not_applicable',reason:'No sourced business range is configured.'}];
   return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,issues:bad?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
  }));

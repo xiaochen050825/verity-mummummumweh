@@ -1,5 +1,6 @@
 import {KEYS,blankFields,compareDocuments,normalizeField,validateEvidence,norm,RULE_VERSION,PORT_VERSION} from './rules.js';
 import {makeProvider} from './provider.js';
+import {applySourceProfile} from './source-profile.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
@@ -19,7 +20,8 @@ export async function runPipeline(original,documents,env={},options={}){
   if(c.classificationOnly){c.fields={};stage('complete');event(c,'Request classified','Draft BL requested; no SI/BL comparison was performed.');return c}
   if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete');return c}
   stage('extracting');const extracted=[];
-  for(const doc of documents){
+  for(const input of documents){
+   const doc=applySourceProfile(input);
    if(doc.readError){extracted.push({...doc,side:null,fields:{},type:'UNREADABLE'});continue}
    const providerKey=provider.status.extraction+'/'+(provider.status.model||'parser')+'/'+(provider.status.ocrModel||'browser-ocr')+'/extract-2';
    const cached=original.docs?.find(d=>d.id===doc.id&&d.sha256===doc.sha256&&d.fields&&d.providerKey===providerKey);
