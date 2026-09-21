@@ -1,0 +1,32 @@
+import {norm} from './rules.js';
+import {isRegisteredSource} from './source-profile.js';
+
+// Reference types are kept separate: an order number is not a booking number.
+export function sourceReferences(doc){
+ const refs={booking:[],order:[],bl:[]};
+ const patterns={booking:/\bBOOKING(?:[ \t]+(?:REFERENCE|REF\.?|NUMBER|NO\.?))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,order:/\bORDER[ \t]+(?:NUMBER|NO\.?)[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,bl:/\bB\/?L[ \t]+(?:NUMBER|NO\.?)(?:[ \t]*\([^)]*\))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi};
+ for(const page of doc.pages||[]){
+  // Low-quality OCR cannot establish automatic identity.
+  if(page.method==='ocr'&&!page.ocrEngine&&(page.confidence??0)<80)continue;
+  for(const [kind,re] of Object.entries(patterns))for(const m of page.text.matchAll(re)){
+   if(/^(?:REFERENCE|NUMBER|NONE|MISSING|UNKNOWN)$/i.test(m[1]))continue;
+   refs[kind].push({value:norm(m[1]).toUpperCase(),quote:m[0],page:page.page});
+  }
+  // The supplied renderer explicitly places so_number in the title's second
+  // spreadsheet cell. Apply that convention only to registered source bytes.
+  if(page.method==='native'&&isRegisteredSource(doc))for(const m of page.text.matchAll(/^(?:BL INSTRUCTION|BILL OF LADING)\t+(\d{6,})[ \t]*$/gim))refs.order.push({value:m[1],quote:m[0],page:page.page,convention:'data_v2/render.py:179 so_number'});
+ }
+ return refs;
+}
+export function automaticPairEvidence(si,bl){
+ const a=sourceReferences(si),b=sourceReferences(bl),matches=[];
+ for(const kind of ['booking','order','bl']){
+  const av=[...new Set(a[kind].map(r=>r.value))],bv=[...new Set(b[kind].map(r=>r.value))];
+  if(av.length>1||bv.length>1)return {ok:false,reason:'multiple_'+kind+'_references',si:a,bl:b};
+  if(av.length&&bv.length){
+   if(av[0]!==bv[0])return {ok:false,reason:'conflicting_'+kind+'_references',si:a,bl:b};
+   matches.push({kind,value:av[0],si:a[kind][0],bl:b[kind][0]});
+  }
+ }
+ return matches.length?{ok:true,matches,si:a,bl:b}:{ok:false,reason:'no_shared_source_reference',si:a,bl:b};
+}

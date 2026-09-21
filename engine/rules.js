@@ -1,12 +1,90 @@
+import {sourceWeightUnit} from './source-profile.js';
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.1';
-export const PORT_VERSION='ports-curated-1';
-// Deliberately bounded lookup. Unlisted locations require human evidence.
-const PORTS={SGSIN:['SINGAPORE'],MYPKG:['PORT KLANG','PORT KELANG'],USLAX:['LOS ANGELES'],USPDX:['PORTLAND OREGON','PORTLAND OR'],AUPTJ:['PORTLAND VICTORIA','PORTLAND VIC'],CNSHA:['SHANGHAI'],CNNGB:['NINGBO'],CNNTG:['NANTONG'],HKHKG:['HONG KONG'],NLRTM:['ROTTERDAM'],PECLL:['CALLAO'],PKKHI:['KARACHI'],SIKOP:['KOPER'],TRMER:['MERSIN']};
+export const RULE_VERSION='verity-rules-1.2';
+export const PORT_VERSION='ports-curated-2';
+// Bounded comparison dictionary; code identities checked against UNECE 2025-1.
+// Source names and declared codes are checked separately. See docs/port-reference.md.
+const PORTS={
+ SGSIN:['SINGAPORE'],
+ MYPKG:['PORT KLANG','PORT KELANG','KLANG'],
+ INNSA:['NHAVA SHEVA','JAWAHARLAL NEHRU PORT','JNPT'],
+ IDBUA:['BULA'],
+ IDBUN:['BUATAN'],
+ CNSHA:['SHANGHAI HONGQIAO INTERNATIONAL APT'],
+ CNSGH:['SHANGHAI'],
+ CNNGB:['NINGBO LISHE INTERNATIONAL APT'],
+ CNNBO:['NINGBO'],
+ CNNTG:['NANTONG'],
+ CNRUG:['RUGAO'],
+ GNCKY:['CONAKRY'],
+ NGAPP:['APAPA','LAGOS APAPA'],
+ PLGDN:['GDANSK'],
+ PLGDY:['GDYNIA'],
+ LTKLJ:['KLAIPEDA'],
+ USSAV:['SAVANNAH'],
+ MMRGN:['YANGON','RANGOON'],
+ AUBNE:['BRISBANE'],
+ USNYC:['NEW YORK'],
+ USLGB:['LONG BEACH'],
+ KEMBA:['MOMBASA'],
+ AUFRE:['FREMANTLE'],
+ VNSGN:['HO CHI MINH CITY','HOCHIMINH CITY','HO CHI MINH','SAIGON'],
+ ILASH:['ASHDOD'],
+ CLVAP:['VALPARAISO'],
+ KRPTK:['PYEONGTAEK'],
+ USBAL:['BALTIMORE'],
+ AEJEA:['JEBEL ALI'],
+ USHOU:['HOUSTON'],
+ KRPUS:['BUSAN'],
+ JOAQB:['AQABA'],
+ USLAX:['LOS ANGELES'],
+ USPDX:['PORTLAND OREGON','PORTLAND OR'],
+ AUPTJ:['PORTLAND VICTORIA','PORTLAND VIC'],
+ HKHKG:['HONG KONG'],
+ NLRTM:['ROTTERDAM'],
+ PECLL:['CALLAO'],
+ PKKHI:['KARACHI'],
+ SIKOP:['KOPER'],
+ TRMER:['MERSIN'],
+ INPAV:['PIPAVAV'],
+ INMAA:['CHENNAI','MADRAS'],
+ INTUT:['TUTICORIN','THOOTHUKUDI','TUTICORN'],
+ EGPSD:['PORT SAID'],
+ GHTEM:['TEMA'],
+ PHMNL:['MANILA'],
+ PHCEB:['CEBU'],
+};
 export const norm=s=>String(s??'').normalize('NFKC').replace(/\s+/g,' ').trim();
 const name=s=>norm(s).toUpperCase().replace(/[.,]/g,'').replace(/\s+/g,' ');
+const entityName=s=>name(s).replace(/[|;]/g,' ').replace(/\s+/g,' ').trim();
 const fail=(kind,reason)=>({ok:false,kind,reason});
 const good=value=>({ok:true,value});
+function portParts(raw){
+ const text=norm(raw).toUpperCase();
+ const codes=[...new Set((text.match(/\b[A-Z]{2}[A-Z0-9]{3}\b/g)||[]).filter(c=>PORTS[c]||text===c||text.includes('('+c+')')||text.includes('['+c+']')))];
+ const without=codes.reduce((t,c)=>t.replaceAll(c,''),text).replace(/\(\)|\[\]/g,'').trim();
+ const location=without.split(',')[0].replace(/\((?:WESTPORT|NORTHPORT)\)/g,'').trim();
+ const names=location.split('/').map(s=>name(s)).filter(Boolean);
+ const identities=names.map(s=>{
+  const matches=Object.entries(PORTS).filter(([,aliases])=>aliases.some(a=>s===name(a)||s.startsWith(name(a)+' ')));
+  // Prefer the longest exact alias, so an airport is not its surrounding city.
+  const exact=matches.filter(([,aliases])=>aliases.some(a=>s===name(a)));
+  const choices=exact.length?exact:matches;
+  return choices.length===1?choices[0][0]:null;
+ });
+ const named=identities.length&&identities.every(Boolean)?[...new Set(identities)].sort():null;
+ return {codes,named,hasName:!!location};
+}
+function normalizePort(raw){
+ if(name(raw)==='PORTLAND')return fail('AMBIGUOUS','alias_collision');
+ const p=portParts(raw);
+ if(p.codes.length>1||p.codes.some(c=>!PORTS[c]))return fail('AMBIGUOUS','alias_not_found');
+ if(p.hasName&&!p.named)return fail('AMBIGUOUS','alias_not_found');
+ if(p.codes.length&&p.named&&!p.named.includes(p.codes[0]))return {...fail('AMBIGUOUS','port_name_code_conflict'),port:p};
+ if(!p.named&&!p.codes.length)return fail('AMBIGUOUS','alias_not_found');
+ // A slash list stays a list; never silently choose the final location.
+ return {...good(p.named?.length>1?'locations:'+p.named.join('/')+';code:'+(p.codes[0]||''):p.codes[0]||p.named[0]),port:p};
+}
 export function number(raw,profile='unset',factor='1'){
  let s=norm(raw);if(!s)return fail('MISSING','missing_value');
  const patterns={unset:/^[+-]?\d+$/,en_comma:/^[+-]?(?:\d+|[1-9]\d{0,2}(?:,\d{3})+)(?:\.\d+)?$/};
@@ -18,7 +96,7 @@ export function number(raw,profile='unset',factor='1'){
 }
 function wordNumber(raw){const units=['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'],tens=['TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'],w=raw.toUpperCase().split(/[- ]/);if(w.length===1&&units.includes(w[0]))return String(units.indexOf(w[0]));const t=tens.indexOf(w[0]),u=units.indexOf(w[1]);if(t>=0&&(w.length===1||w.length===2&&u>0&&u<10))return String((t+2)*10+(w.length===2?u:0));return null}
 export function normalizeField(key,raw,profile='unset'){
- const s=norm(raw);if(!s||/^(?:N\/?A|NONE|NOT PROVIDED|MISSING|-)$/i.test(s))return fail('MISSING','missing_value');
+ const s=norm(raw);if(!s||/^(?:N\/?A|NONE|NOT PROVIDED|MISSING|-|TBA|TBD|_{2,}(?:\s*(?:KG|KGS|MT))?)$/i.test(s))return fail('MISSING','missing_value');
  if(key==='gross_weight_kg'){
   const m=s.match(/^([+-]?\d[\d.,]*|[A-Z]+(?:[- ][A-Z]+)?)\s*(KG|KGS|KILOGRAMS?|MT|M\/T|METRIC TONS?|METRIC TONNES?|TONNES?)$/i);
   if(!m)return /^[+-]?[\d.,]+$/.test(s)?fail('MISSING','unit_absent'):fail('AMBIGUOUS','weight_unit_or_value');
@@ -33,14 +111,7 @@ export function normalizeField(key,raw,profile='unset'){
   const tens=['TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'];const t=tens.indexOf(words[0]),u=units.indexOf(words[1]);if(t>=0&&(words.length===1||words.length===2&&u>0&&u<10))return good(String((t+2)*10+(words.length===2?u:0)));
   return fail('AMBIGUOUS','invalid_container_count');
  }
- if(key.startsWith('port_')){
-  const text=name(s),codes=(text.match(/\b[A-Z]{2}[A-Z0-9]{3}\b/g)||[]).filter(c=>PORTS[c]||c===text||text.includes('('+c+')')||text.includes('['+c+']')),valid=codes.filter(c=>PORTS[c]);
-  const without=codes.reduce((t,c)=>t.replace(c,''),text).replace(/[()\[\],]/g,' ').replace(/\s+/g,' ').trim();
-  if(text==='PORTLAND')return fail('AMBIGUOUS','alias_collision');
-  const named=[...new Set(Object.entries(PORTS).filter(([,aliases])=>aliases.some(a=>without===name(a)||without.startsWith(name(a)+' '))).map(([c])=>c))];
-  if(codes.length){if(codes.length!==1||valid.length!==1)return fail('AMBIGUOUS','alias_not_found');if(without&&(!named.length||named.length!==1||named[0]!==valid[0]))return fail('AMBIGUOUS','port_name_code_conflict');return good(valid[0])}
-  return named.length===1?good(named[0]):fail('AMBIGUOUS','alias_not_found');
- }
+ if(key.startsWith('port_'))return normalizePort(s);
  return good(name(s));
 }
 export function validateEvidence(field,doc,key){
@@ -65,12 +136,15 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
    let raw=norm(f?.raw);
    // Some extractions include the heading in raw. Strip only a heading that
    // begins the source quote too; "Consignee: TO THE ORDER OF X" is a value.
-   if(key==='consignee'&&/^TO THE ORDER OF\s*[:：]/i.test(raw)&&norm(f.quote).startsWith(raw))raw=raw.replace(/^TO THE ORDER OF\s*[:：]\s*/i,'');
+   if(key==='consignee'&&/^TO THE ORDER OF[ \t]*[:：\t]/i.test(f?.raw||'')&&norm(f.quote).startsWith(raw))raw=norm(f.raw.replace(/^TO THE ORDER OF[ \t]*[:：\t][ \t]*/i,''));
    const address=norm(f?.entity?.address);
-   return address&&raw.endsWith(address)?raw.slice(0,-address.length).trim():raw;
+   return entityName(address&&raw.endsWith(address)?raw.slice(0,-address.length).trim():raw);
   };
   const entityField=['shipper','consignee','notify_party'].includes(key);
   let x=av.ok?normalizeField(key,entityField?entityRaw(a):a.raw,profiles.si):av,y=bv.ok?normalizeField(key,entityField?entityRaw(b):b.raw,profiles.bl):bv;
+  const unitSI=key==='gross_weight_kg'&&av.ok?sourceWeightUnit(si,a):null,unitBL=key==='gross_weight_kg'&&bv.ok?sourceWeightUnit(bl,b):null;
+  if(unitSI)x=normalizeField(key,a.raw+' '+unitSI.unit,profiles.si);
+  if(unitBL)y=normalizeField(key,b.raw+' '+unitBL.unit,profiles.bl);
   // A literal cross-reference may only resolve to a validated consignee in the same document.
   const reference=(doc,f,profile)=>{if(key==='notify_party'&&/^SAME AS CONSIGNEE$/i.test(norm(f?.raw))){const c=doc.fields.consignee;return validateEvidence(c,doc).ok?normalizeField('consignee',c.raw,profile):fail('AMBIGUOUS','entity_identity')}return null};
   if(av.ok)x=reference(si,a,profiles.si)||x;if(bv.ok)y=reference(bl,b,profiles.bl)||y;
@@ -80,9 +154,21 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
   if(sameEntitySource){x=good(name(a.raw));y=good(name(b.raw))}
   const bad=!x.ok?x:!y.ok?y:null;
   let comparison=bad?null:x.value===y.value?'MATCH':'MISMATCH',reason=bad?.reason||null,kind=bad?.kind||null;
-  const scopeWarning=!sameEntitySource&&entityField&&a?.entity?.address&&b?.entity?.address&&name(a.entity.address)!==name(b.entity.address)?'address_conflict':null;
+  // A code/name inconsistency inside a source must not hide a demonstrable
+  // difference between two named locations, or manufacture a difference when
+  // the complete, independently validated source expressions are identical.
+  let portDecision=null;
+  if(key.startsWith('port_')&&av.ok&&bv.ok&&x.port&&y.port){
+   if(name(a.raw)===name(b.raw)){comparison='MATCH';portDecision='identical_source_expression'}
+   else if(x.port.named&&y.port.named&&x.port.named.join('/')!==y.port.named.join('/')){comparison='MISMATCH';portDecision='different_named_locations'}
+   else if(x.port.codes.length===1&&y.port.codes.length===1&&x.port.codes[0]!==y.port.codes[0]){comparison='MISMATCH';portDecision='different_declared_codes'}
+   if(portDecision){reason=null;kind=null}
+  }
+  const scopeWarning=!sameEntitySource&&entityField&&a?.entity?.address&&b?.entity?.address&&entityName(a.entity.address)!==entityName(b.entity.address)?'address_conflict':null;
   const qa=[{rule:'source_evidence',version:RULE_VERSION,status:av.ok&&bv.ok?'pass':'flag'},{rule:'field_grammar',status:bad?'flag':'pass'},{rule:'detail_totals',status:'not_applicable',reason:'No verified complete detail-total relationship provided.'},{rule:'business_range',status:'not_applicable',reason:'No sourced business range is configured.'}];
-  return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,issues:bad?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
+  if(portDecision)qa.push({rule:'port_source_comparison',status:'pass',reason:portDecision,sourceWarning:bad?.reason||null});
+  if(unitSI||unitBL)qa.push({rule:'source_unit',status:'pass',si:unitSI,bl:unitBL});
+  return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,source_warnings:portDecision&&bad?[bad.reason]:[],issues:bad&&!portDecision?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
  }));
 }
 export const blankFields=()=>Object.fromEntries(KEYS.map(k=>[k,{si:'Not extracted',bl:'Not extracted',comparison:null,reason:'comparison_paused',kind:'UNREADABLE'}]));

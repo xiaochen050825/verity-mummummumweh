@@ -1,11 +1,12 @@
 import {KEYS,blankFields,compareDocuments,normalizeField,validateEvidence,norm,RULE_VERSION,PORT_VERSION} from './rules.js';
-import {makeProvider} from './provider.js';
+import {makeProvider,recoverNativeExtraction} from './provider.js';
 import {applySourceProfile} from './source-profile.js';
+import {automaticPairEvidence} from './references.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
- c.version=(c.version||0)+1;c.fields=blankFields();c.docIssue=null;c.processingError=null;c.pairIssue=false;c.deferred=false;
+ c.version=(c.version||0)+1;c.fields=blankFields();c.docIssue=null;c.processingError=null;c.pairIssue=false;c.pair=null;c.pairNote=null;c.pairEvidence=null;c.deferred=false;
  c.pipeline={status:'classifying',provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
@@ -32,14 +33,17 @@ export async function runPipeline(original,documents,env={},options={}){
     const transcript=await provider.ocrPage(image);
     if(transcript){page.browserOcrText=page.text;page.text=transcript;page.ocrEngine=provider.status.ocrModel}
    }
-   const result=cached||await provider.extract(reading);const full=reading.pages.map(p=>p.text).join('\n');
+   const result=recoverNativeExtraction(reading,cached||await provider.extract(reading));const full=reading.pages.map(p=>p.text).join('\n');
    const booking=result.booking&&result.bookingQuote&&norm(full).includes(norm(result.bookingQuote))&&norm(result.bookingQuote).includes(norm(result.booking))?result.booking:null;
    extracted.push({...reading,...result,pages:reading.pages,booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,providerKey});c.docs=[...extracted];
   }
   c.docs=extracted;stage('pairing');const si=extracted.filter(d=>d.side==='si'),bl=extracted.filter(d=>d.side==='bl');
   let a,b;if(options.pair){a=si.find(d=>d.id===options.pair.si);b=bl.find(d=>d.id===options.pair.bl);if(!a||!b)throw Error('Choose one SI and one BL.');if(a.booking&&b.booking&&a.booking!==b.booking)throw Error('The chosen files have different booking references.');if((!a.booking||!b.booking)&&!options.pair.note?.trim())throw Error('Missing booking references need a pairing reason.')}
-  else if(si.length===1&&bl.length===1&&si[0].booking&&si[0].booking===bl[0].booking){[a,b]=[si[0],bl[0]]}
-  else {c.pair=null;if(extracted.some(d=>d.readError)){c.processingError='unsupported_format';c.processingDetail=extracted.find(d=>d.readError).readError}else if(!si.length)c.docIssue='missing_si';else if(!bl.length)c.docIssue=extracted.some(d=>d.type==='OTHER')?'wrong_type':'missing_bl';else c.pairIssue=true;stage('review');event(c,'Comparison paused',c.docIssue||c.processingError||'An explicit SI and BL pair is required.');return c}
+  else if(si.length===1&&bl.length===1){
+   c.pairEvidence=automaticPairEvidence(si[0],bl[0]);
+   if(c.pairEvidence.ok){[a,b]=[si[0],bl[0]];c.pairNote='Paired using source '+c.pairEvidence.matches.map(m=>m.kind+': '+m.value).join('; ');event(c,'Documents paired',c.pairNote)}
+  }
+  if(!a||!b){c.pair=null;if(extracted.some(d=>d.readError)){c.processingError='unsupported_format';c.processingDetail=extracted.find(d=>d.readError).readError}else if(!si.length)c.docIssue='missing_si';else if(!bl.length)c.docIssue=extracted.some(d=>d.type==='OTHER')?'wrong_type':'missing_bl';else c.pairIssue=true;stage('review');event(c,'Comparison paused',c.docIssue||c.processingError||c.pairEvidence?.reason||'An explicit SI and BL pair is required.');return c}
   c.pair={si:a.id,bl:b.id};c.booking=a.booking||b.booking||c.booking;
   stage('validating');
   // Reread only the problematic document and field; never provide the other side.

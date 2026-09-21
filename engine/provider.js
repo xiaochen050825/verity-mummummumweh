@@ -1,10 +1,11 @@
 import {z} from 'zod';
 import {KEYS,norm,validateEvidence} from './rules.js';
+import {sourceReferences} from './references.js';
 export const CATEGORIES=['BL_COMPARISON','SI_REQUEST','INVOICE_QUERY','GENERAL','SPAM'];
 const Field=z.object({raw:z.string().max(4000).nullable(),quote:z.string().max(6000),page:z.number().int().positive(),status:z.enum(['OK','MISSING','AMBIGUOUS']),entity:z.object({name:z.string(),qualifier:z.string(),address:z.string()}).optional()}).strict();
 const Extraction=z.object({type:z.enum(['SI','BL','OTHER','AMBIGUOUS']),booking:z.string().max(200).nullable(),bookingQuote:z.string().max(1000),fields:z.object(Object.fromEntries(KEYS.map(k=>[k,Field]))).strict()}).strict();
 const Classification=z.object({category:z.enum(CATEGORIES),quote:z.string().max(2000),reason:z.string().max(1000),needsReview:z.boolean()}).strict();
-const aliases={shipper:'shipper(?:/exporter)?|exporter',consignee:'consignee|to the order of',notify_party:'notify party|notify',port_of_loading:'port of loading|loading port|pol|load port',port_of_discharge:'port of discharge|discharge port|pod',container_count:'container count|total containers|no\\.? of containers(?: or packages)?|number of containers|containers',gross_weight_kg:'gross weight|gross wt|gross mass'};
+const aliases={shipper:'shipper(?:/exporter)?|exporter',consignee:'consignee|to the order of',notify_party:'notify party(?:/intermediate consignee)?|notify',port_of_loading:'port of loading|loading port|pol|load port',port_of_discharge:'port of discharge|discharge port|pod',container_count:'container count|total containers|no\\.? of containers(?: or packages)?|number of containers|containers',gross_weight_kg:'gross weight|gross wt|gross mass'};
 export const keywordGate=email=>/\b(?:b\/?l|bills?\s+of\s+lading|shipping\s+instructions?|si)\b|出货指示|提单/i.test(email.subject+'\n'+email.body);
 export function localClassify(email){
  const text=email.subject+'\n'+email.body,gate=keywordGate(email);
@@ -15,9 +16,9 @@ export function localClassify(email){
  return {category,quote:current.slice(0,1000),reason:'Conservative local routing; keyword screening uses the complete message.',needsReview:category==='GENERAL'||negated,provider:'local-rules',gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:text.length,complete:true},promptVersion:'route-1'};
 }
 export function localExtract(doc){
- const text=doc.pages.map(p=>p.text).join('\n'),hasSI=/^\s*(?:SHIPPING INSTRUCTIONS?|BL INSTRUCTION)\b/im.test(text),hasBL=/^\s*(?:DRAFT\s+)?BILL OF LADING\b/im.test(text);
- const bookingMatches=[...text.matchAll(/^\s*booking(?:\s+(?:reference|ref\.?|number|no\.?))?\s*(?:[:#]|\t+)\s*([^\t\n]+)/gim)];
- const bookings=[...new Set(bookingMatches.map(m=>norm(m[1])))];
+ const text=doc.pages.map(p=>p.text).join('\n'),hasSI=/^[ \t]*(?:SHIPPING INSTRUCTIONS?|BL INSTRUCTIONS?|BILL OF LADING INSTRUCTIONS?)\b/im.test(text),hasBL=/^[ \t]*(?:DRAFT\s+)?BILL OF LADING\b(?![ \t]+INSTRUCTIONS?\b)/im.test(text);
+ const bookingMatches=sourceReferences(doc).booking;
+ const bookings=[...new Set(bookingMatches.map(m=>m.value))];
  const fields=Object.fromEntries(KEYS.map(key=>{
   const values=[];for(const p of doc.pages){const regex=new RegExp('^[ \\t]*('+aliases[key]+')(?:[ \\t]*\\([^\\n)]*\\))?[ \\t]*(?:[:：][ \\t]*|\\t+)([^\\n]*)','gim');for(const m of p.text.matchAll(regex)){
    let raw=m[2].trim(),quote=m[0].trim(),entity;
@@ -31,18 +32,17 @@ export function localExtract(doc){
   }}
   const unique=[...new Set(values.map(v=>norm(v.raw)))];return [key,values.length?{...values[0],status:unique.length>1?'AMBIGUOUS':'OK'}:{raw:null,quote:'',page:1,status:'MISSING'}];
  }));
- return {type:hasSI&&hasBL?'AMBIGUOUS':hasSI?'SI':hasBL?'BL':'OTHER',booking:bookings.length===1?bookings[0]:null,bookingQuote:bookings.length===1?bookingMatches[0][0]:'',fields,provider:'local-rules'};
+ return {type:hasSI&&hasBL?'AMBIGUOUS':hasSI?'SI':hasBL?'BL':'OTHER',booking:bookings.length===1?bookings[0]:null,bookingQuote:bookings.length===1?bookingMatches[0].quote:'',fields,provider:'local-rules'};
 }
-function recoverNativeExtraction(doc,result){
+export function recoverNativeExtraction(doc,result){
  if(!doc.pages?.length||doc.pages.some(p=>p.method!=='native'))return result;
  const native=localExtract(doc),recovered=[],fields={...result.fields},full=doc.pages.map(p=>p.text).join('\n');
  for(const key of KEYS){
-  if(!validateEvidence(fields[key],doc,key).ok&&validateEvidence(native.fields[key],doc,key).ok){fields[key]={...native.fields[key],readMethod:'native_label'};recovered.push(key)}
+  const withUnit=key==='gross_weight_kg'&&/^\d[\d.,]*$/.test(norm(fields[key]?.raw))&&norm(native.fields[key]?.raw).startsWith(norm(fields[key]?.raw)+' ');
+  if((!validateEvidence(fields[key],doc,key).ok||withUnit)&&validateEvidence(native.fields[key],doc,key).ok){fields[key]={...native.fields[key],readMethod:'native_label'};recovered.push(key)}
  }
- const validBooking=x=>x.booking&&x.bookingQuote&&norm(full).includes(norm(x.bookingQuote))&&norm(x.bookingQuote).includes(norm(x.booking));
- const booking=validBooking(result)&&validBooking(native)&&norm(result.booking)!==norm(native.booking)?null:validBooking(result)?result.booking:validBooking(native)?native.booking:null;
- const bookingQuote=booking===result.booking?result.bookingQuote:booking===native.booking?native.bookingQuote:'';
- const type=['SI','BL'].includes(result.type)&&['SI','BL'].includes(native.type)&&result.type!==native.type?'AMBIGUOUS':result.type==='OTHER'&&['SI','BL'].includes(native.type)?native.type:result.type;
+ const booking=native.booking,bookingQuote=native.bookingQuote;
+ const type=native.type==='AMBIGUOUS'?'AMBIGUOUS':['SI','BL'].includes(result.type)&&['SI','BL'].includes(native.type)&&result.type!==native.type?'AMBIGUOUS':['OTHER','AMBIGUOUS'].includes(result.type)&&['SI','BL'].includes(native.type)?native.type:result.type;
  return {...result,type,booking,bookingQuote,fields,recoveredFields:recovered};
 }
 function documentAPI(env){
