@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {Input,bindSource} from './input.js';
 import {runPipeline,reviewAction,PIPELINE_VERSION} from '../engine/pipeline.js';
 import {providerStatus} from '../engine/provider.js';
 import {importEmails,buildReport} from '../src/model.js';
@@ -6,7 +7,6 @@ import {competitionOutput,diagnostics} from '../engine/export.js';
 import {RULE_VERSION} from '../engine/rules.js';
 import {applySourceProfile} from '../engine/source-profile.js';
 const reply=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-const Input=z.object({id:z.string().max(300),name:z.string().max(500),pages:z.array(z.object({page:z.number().int().min(1).max(30),text:z.string().max(100000),method:z.enum(['native','ocr']),confidence:z.number().min(0).max(100).optional(),imageId:z.string().optional(),blocks:z.array(z.unknown()).max(5000).optional()})).max(30),readError:z.string().max(500).optional(),numberProfile:z.enum(['unset','en_comma','de_dot']).optional(),profileEvidence:z.string().max(2000).optional()});
 async function body(req){const text=await req.text();if(text.length>4_000_000)throw Error('Request too large.');return JSON.parse(text)}
 async function fileMeta(env,owner,id){const f=await env.DB.prepare('SELECT * FROM files WHERE owner=? AND id=?').bind(owner,id).first();if(!f)throw Error('Source file not found.');return f}
 async function getCase(env,owner,id){const row=await env.DB.prepare('SELECT data,revision FROM cases WHERE owner=? AND id=?').bind(owner,id).first();if(!row)throw Error('Case not found.');return {...JSON.parse(row.data),revision:row.revision,server:true}}
@@ -54,7 +54,7 @@ export default {async fetch(req,env){
     const out=reviewAction(c,input.action,input.payload);return reply(await saveCase(env,owner,out,c.revision));
    }
    if(!Array.isArray(input.documents)||input.documents.length>12)throw Error('Choose at most 12 document candidates.');
-   const docs=[];for(const raw of input.documents){const d=Input.parse(raw);const f=await fileMeta(env,owner,d.id);for(const p of d.pages)if(p.imageId)await fileMeta(env,owner,p.imageId);docs.push(applySourceProfile({...d,numberProfile:d.numberProfile||'unset',name:f.name,sha256:f.sha256,size:f.size,server:true}))}
+   const docs=[];for(const raw of input.documents){const d=Input.parse(raw);const f=await fileMeta(env,owner,d.id);for(const p of d.pages)if(p.imageId)await fileMeta(env,owner,p.imageId);docs.push(applySourceProfile({...bindSource(d,f),numberProfile:d.numberProfile||'unset'}))}
    const fingerprint=docs.map(d=>d.sha256+':'+d.numberProfile).sort().join('|'),sameSource=c.sourceFingerprint===fingerprint,sameEngine=c.pipeline?.engineVersion===PIPELINE_VERSION;
    if(c.processingError==='processing_failed'&&sameSource&&sameEngine)throw Error('The provider or output contract needs correction. This failed request cannot be repeated on unchanged sources.');
    if(c.processingError&&sameSource&&sameEngine&&c.retries>=1)throw Error('This source version has reached its retry limit. Add new source material.');

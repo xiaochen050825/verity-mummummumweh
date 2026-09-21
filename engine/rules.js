@@ -1,8 +1,8 @@
 import {sourceWeightUnit,sourceNumericCell,sourceNumberFormat} from './source-profile.js';
 import {parseNumber,invariantNumericComparison} from './numbers.js';
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.8';
-export const PORT_VERSION='ports-curated-2';
+export const RULE_VERSION='verity-rules-1.9';
+export const PORT_VERSION='ports-curated-3';
 // Bounded comparison dictionary; code identities checked against UNECE 2025-1.
 // Source names and declared codes are checked separately. See docs/port-reference.md.
 const PORTS={
@@ -64,13 +64,21 @@ function portParts(raw){
  const text=norm(raw).toUpperCase();
  const codes=[...new Set((text.match(/\b[A-Z]{2}[A-Z0-9]{3}\b/g)||[]).filter(c=>PORTS[c]||text===c||text.includes('('+c+')')||text.includes('['+c+']')))];
  const without=codes.reduce((t,c)=>t.replaceAll(c,''),text).replace(/\(\)|\[\]/g,'').trim();
- const location=without.split(',')[0].replace(/\((?:WESTPORT|NORTHPORT)\)/g,'').trim();
- const names=location.split('/').map(s=>name(s)).filter(Boolean);
+ const location=without;
+ const names=location.split('/').map(s=>name(s.replace(/,/g,' '))).filter(Boolean);
  const identities=names.map(s=>{
-  const matches=Object.entries(PORTS).filter(([,aliases])=>aliases.some(a=>s===name(a)||s.startsWith(name(a)+' ')));
-  // Prefer the longest exact alias, so an airport is not its surrounding city.
-  const exact=matches.filter(([,aliases])=>aliases.some(a=>s===name(a)));
-  const choices=exact.length?exact:matches;
+  const regions=new Intl.DisplayNames(['en'],{type:'region'});
+  const choices=Object.entries(PORTS).filter(([code,aliases])=>{
+   const country=code.slice(0,2),display=regions.of(country);
+   // CLDR may render a country as "Name (Alternative)"; both explicit names
+   // denote that region. Never discard qualifiers from the document itself.
+   const regionNames=[display,display.replace(/\s*\([^)]*\)/g,''),...Array.from(display.matchAll(/\(([^)]+)\)/g),m=>m[1])];
+   const countries=[country,...regionNames,...({US:['USA','UNITED STATES OF AMERICA'],AE:['UAE'],KR:['REPUBLIC OF KOREA'],VN:['VIET NAM'],TR:['TURKEY']}[country]||[])].map(name);
+   const qualifiers=['',...countries.map(c=>' '+c)];
+   // Terminal names are explicit aliases only for their actual port.
+   const names=code==='MYPKG'?aliases.flatMap(a=>[a,a+' (WESTPORT)',a+' (NORTHPORT)']):aliases;
+   return names.some(a=>qualifiers.some(q=>s===name(a)+q));
+  });
   return choices.length===1?choices[0][0]:null;
  });
  const named=identities.length&&identities.every(Boolean)?[...new Set(identities)].sort():null;

@@ -7,10 +7,21 @@ const token=(text,value)=>{
  const escaped=value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  return new RegExp('(?:^|[^A-Z0-9-])'+escaped+'(?:$|[^A-Z0-9-])','i').test(text);
 };
+// Contradictions veto a proposed relationship, including a shared reference.
+// These are language-level scopes, not sender, filename or dataset exceptions.
+export function pairingContextConflict(context){
+ if(!context)return false;
+ const text=String(context.subject||'')+'\n'+currentMessage(context.body);
+ return /\b(?:not|never|neither|wrong|unrelated|ignore|superseded|cancelled|canceled|previous version|old version|reference only|examples? only|samples? only|do not|don't)\b/i.test(text)
+  || /\b(?:different|separate|another|other|multiple|two|several)\b[^.!?\n]{0,60}\b(?:shipments?|consignments?|customers?|bookings?|orders?)\b/i.test(text)
+  || /\b(?:shipments?|consignments?|bookings?|orders?)\b[^.!?\n]{0,60}\b(?:differ|different|separate|unrelated)\b/i.test(text);
+}
 export function messagePairEvidence(si,bl,refsSI,refsBL,context){
  if(!context?.documents||context.documents.length!==2||context.documents.filter(d=>d.side==='si').length!==1||context.documents.filter(d=>d.side==='bl').length!==1)return null;
  if(!context.documents.some(d=>d.id===si.id&&d.side==='si')||!context.documents.some(d=>d.id===bl.id&&d.side==='bl'))return null;
  const subject=String(context.subject||''),body=currentMessage(context.body);
+ if(pairingContextConflict(context))return null;
+
  if(/^(?:fw|fwd)\s*[:_]/i.test(subject)||/\b(?:wrong|unrelated|ignore|superseded|cancelled|canceled|previous version|old version|reference only|do not|don't|not attached|not the)\b/i.test(subject+'\n'+body))return null;
  const lines=body.split(/\r?\n/).filter(line=>line.length<=700&&/\b(?:attached|enclosed)\b/i.test(line)&&/\b(?:SI|shipping instructions?)\b/i.test(line)&&/\b(?:B\/?L|bill of lading)\b/i.test(line));
  if(lines.length!==1)return null;

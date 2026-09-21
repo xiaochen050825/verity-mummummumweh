@@ -1,0 +1,11 @@
+# Generality fixes — 2026-09-21
+
+- Pairing: current-message relationship conflicts veto both shared-reference and email-declaration paths. Explicitly labelled references in the subject/body are compared only against the same reference type in source documents; unrelated numeric subject content is not treated as a BL identity. Language checks are bounded, conservative heuristics, not a guarantee of understanding every possible contradiction. No email IDs, expected labels, or named customers are used.
+- Ports: exact aliases with independently identified country names/abbreviations replace arbitrary prefix acceptance. Complete CLDR English country labels and their parenthesized alternatives are supported, plus explicit conventional abbreviations. Unknown qualifiers remain unresolved; terminal aliases are scoped to their port. Country information from the source is never simply dropped.
+- Server: PDF reading metadata survives validation and is bound to the stored PDF hash and page sequence. This is validated browser-reader evidence, not a new independent server PDF inspection. Older documents without evidence remain valid but do not acquire invented metadata.
+
+Validation: 520 cached extraction records replayed, then replayed with renamed IDs/files. The final business results and export rows match the pre-fix automatic baseline. 46/46 defect emails detected, 0 false alarms, 0 missed defect emails, 45/46 exact defect-field sets, 450 workflow-complete and 70 pending business/review actions. These are development-set results, not held-out model accuracy. The 411 additional checks pass, including all nine former failures. Production unit tests and build are checked separately.
+
+Official export remains 519/520; one unsupported numeric ambiguity is retained rather than inventing an official reason or claiming human confirmation. Internal review export includes all 520 cases. No new model calls or new latency/cost measurement are involved.
+
+Local evidence outside the deployed source: `work/generality-fix-release/` contains audit.json, evaluation.json, export-check.json, cases, unit/build logs and the complete internal review export. The baseline is `work/generality-audit-final/`.
