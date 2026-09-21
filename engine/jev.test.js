@@ -26,6 +26,18 @@ test('Jev overload and malformed answers recover through Gemini',async()=>{
   assert.equal(result.category,'SI_REQUEST');assert.equal(result.routingFallback.reason,'provider_failure');
  }
 });
+test('backup TypeSafe account is used only when the primary key cannot return a valid decision',async()=>{
+ const redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};const keys=[];
+ const p=makeProvider(redundant,async(_url,opts)=>{const key=opts.headers.Authorization;keys.push(key);return key==='Bearer test'?new Response('',{status:429}):answer()});
+ const result=await p.classify(email);
+ assert.equal(result.provider,'jev');assert.equal(result.routingAccount,'backup');assert.equal(result.routingFailover,true);assert.equal(result.routingAttempts,2);assert.deepEqual(keys,['Bearer test','Bearer backup']);
+});
+test('both unavailable TypeSafe accounts are reported before the independent Gemini fallback',async()=>{
+ const redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};let geminiCalls=0;
+ const p=makeProvider(redundant,async(url)=>{if(url.includes('typesafe'))return new Response('',{status:529});geminiCalls++;return gemini()});
+ const result=await p.classify(email);
+ assert.equal(result.provider,'api');assert.equal(result.routingFallback.reason,'provider_failure');assert.equal(result.routingFallback.errorCode,'AI_TRANSIENT');assert.equal(geminiCalls,1);
+});
 test('fallback cannot clear Gemini review or conceal failure of both services',async()=>{
  const p=makeProvider(env,async url=>url.includes('typesafe')?answer('SI_REQUEST',.5,.1):gemini(true));
  assert.equal((await p.classify(email)).needsReview,true);

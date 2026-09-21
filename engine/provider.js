@@ -65,9 +65,10 @@ function documentAPI(env){
  if(env.AI_API_KEY&&env.AI_BASE_URL&&env.AI_MODEL)return {key:env.AI_API_KEY,base:env.AI_BASE_URL,model:env.AI_MODEL,name:'api'};
  return null;
 }
-export function providerStatus(env){const api=documentAPI(env);return {mode:api?'api':'local-rules',model:api?.model||null,visionModel:api?.visionModel||api?.model||null,ocrModel:env.GRAFILAB_API_KEY?env.GRAFILAB_OCR_MODEL||'grafilab/glm-ocr':null,routing:env.TYPESAFE_API_KEY?'jev':api?'api':'local-rules',extraction:api?.name||'local-rules'}}
+const jevKeys=env=>[env.TYPESAFE_API_KEY,env.TYPESAFE_BACKUP_API_KEY].filter((key,index,all)=>key&&all.indexOf(key)===index);
+export function providerStatus(env){const api=documentAPI(env),routingKeys=jevKeys(env);return {mode:api?'api':'local-rules',model:api?.model||null,visionModel:api?.visionModel||api?.model||null,ocrModel:env.GRAFILAB_API_KEY?env.GRAFILAB_OCR_MODEL||'grafilab/glm-ocr':null,routing:routingKeys.length?'jev':api?'api':'local-rules',extraction:api?.name||'local-rules'}}
 export function makeProvider(env,fetcher=fetch){
- const status=providerStatus(env),api=documentAPI(env);
+ const status=providerStatus(env),api=documentAPI(env),routingKeys=jevKeys(env);
  async function call(schema,instructions,input,image,repair=false){
   const base=new URL(api.base);if(base.protocol!=='https:')throw Error('AI endpoint must use HTTPS.');
   const content=[{type:'text',text:JSON.stringify(input)}];for(const img of (Array.isArray(image)?image:image?[image]:[]))content.push({type:'image_url',image_url:{url:img}});
@@ -91,15 +92,24 @@ export function makeProvider(env,fetcher=fetch){
  async function classifyJev(email){
   const complete=(email.subject+'\n'+email.body).length<=12000;
   const state='Subject: '+email.subject+'\nBody:\n'+email.body.slice(0,12000);
-  const res=await fetcher('https://api.typesafe.ai/v1/systemone',{method:'POST',headers:{Authorization:'Bearer '+env.TYPESAFE_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({model:env.JEV_MODEL||'jev-1.13.0',state,questions:{category:{type:'choice',instructions:routingInstructions,criteria:categoryDefinitions},compare_intent:{type:'noul',instructions:'The current message requests checking, verification, approval, correction of a specific draft Bill of Lading, or requests a draft BL to be sent for checking. Generic operational lists, mass reminders, mentions and quoted old requests are not enough.'}}}),signal:AbortSignal.timeout(15000),redirect:'error'});
-  if(!res.ok){const e=Error('Jev returned HTTP '+res.status);e.code=[408,429,500,502,503,504,529].includes(res.status)?'AI_TRANSIENT':'AI_CONFIGURATION';throw e}
-  const answers=(await res.json()).answers||{},category=answers.category?.choice,confidence=answers.category?.confidence,intent=answers.compare_intent?.noul;
-  if(!CATEGORIES.includes(category)||!Number.isFinite(confidence)||confidence<0||confidence>1||!Number.isFinite(intent)||intent<0||intent>1){const e=Error('Jev response did not satisfy the classification contract.');e.code='AI_INVALID_OUTPUT';throw e}
-  const current=email.body.split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0];
-  const line=current.split('\n').map(x=>x.trim()).find(x=>x&&/\b(?:b\/?l|bill of lading|shipping instructions?|invoice|billing)\b/i.test(x))||current.split('\n').map(x=>x.trim()).find(Boolean)||email.subject;
-  const quote=line.slice(0,1000),gate=keywordGate(email);
-  const needsReview=!complete||confidence<0.8||(category==='BL_COMPARISON'?(!gate||intent<0.8):intent>0.2)||!quote;
-  return {category,quote,quoteSource:'email_excerpt',confidence,comparisonIntent:intent,reason:'Jev routing; confidence '+confidence.toFixed(2)+'; comparison intent '+intent.toFixed(2)+'. Email excerpt is context, not a model-generated explanation.',needsReview,provider:'jev',gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:email.subject.length+email.body.length,complete},promptVersion:ROUTE_VERSION};
+  const body=JSON.stringify({model:env.JEV_MODEL||'jev-1.13.0',state,questions:{category:{type:'choice',instructions:routingInstructions,criteria:categoryDefinitions},compare_intent:{type:'noul',instructions:'The current message requests checking, verification, approval, correction of a specific draft Bill of Lading, or requests a draft BL to be sent for checking. Generic operational lists, mass reminders, mentions and quoted old requests are not enough.'}}});
+  const failures=[];
+  for(let index=0;index<routingKeys.length;index++){
+   try{
+    const res=await fetcher('https://api.typesafe.ai/v1/systemone',{method:'POST',headers:{Authorization:'Bearer '+routingKeys[index],'Content-Type':'application/json'},body,signal:AbortSignal.timeout(15000),redirect:'error'});
+    if(!res.ok){const e=Error('Jev returned HTTP '+res.status);e.code=[408,429,500,502,503,504,529].includes(res.status)?'AI_TRANSIENT':'AI_CONFIGURATION';throw e}
+    const answers=(await res.json()).answers||{},category=answers.category?.choice,confidence=answers.category?.confidence,intent=answers.compare_intent?.noul;
+    if(!CATEGORIES.includes(category)||!Number.isFinite(confidence)||confidence<0||confidence>1||!Number.isFinite(intent)||intent<0||intent>1){const e=Error('Jev response did not satisfy the classification contract.');e.code='AI_INVALID_OUTPUT';throw e}
+    const current=email.body.split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0];
+    const line=current.split('\n').map(x=>x.trim()).find(x=>x&&/\b(?:b\/?l|bill of lading|shipping instructions?|invoice|billing)\b/i.test(x))||current.split('\n').map(x=>x.trim()).find(Boolean)||email.subject;
+    const quote=line.slice(0,1000),gate=keywordGate(email);
+    const needsReview=!complete||confidence<0.8||(category==='BL_COMPARISON'?(!gate||intent<0.8):intent>0.2)||!quote;
+    return {category,quote,quoteSource:'email_excerpt',confidence,comparisonIntent:intent,reason:'Jev routing; confidence '+confidence.toFixed(2)+'; comparison intent '+intent.toFixed(2)+'. Email excerpt is context, not a model-generated explanation.',needsReview,provider:'jev',routingAccount:index?'backup':'primary',routingFailover:index>0,routingAttempts:index+1,gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:email.subject.length+email.body.length,complete},promptVersion:ROUTE_VERSION};
+   }catch(error){failures.push(error)}
+  }
+  const last=failures.at(-1)||Error('No Jev routing key is configured.');
+  if(routingKeys.length>1){last.message='Both Jev routing accounts are unavailable. The document AI fallback will be used when available.';last.routingKeysExhausted=true;last.routingFailures=failures.map(error=>error.code||error.name||'ERROR')}
+  throw last;
  }
  function explicitInvoice(email){
   if(keywordGate(email))return null;
