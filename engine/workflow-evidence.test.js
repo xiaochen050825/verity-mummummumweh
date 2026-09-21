@@ -31,3 +31,13 @@ test('business decisions and incomplete checks remain distinct without hiding di
  c.processingError='service_timeout';assert.equal(reviewState(c).key,'system_failure');assert.equal(reviewState(c).differences,1);
  assert.equal(reviewState({category:'GENERAL',pipeline:{status:'complete'}}).key,'classification_only');
 });
+test('fresh native evidence supersedes incomplete cached text even without typed cells',async()=>{
+ const doc=(id,title)=>({id,name:id+'.txt',sha256:id+'-original',pages:[{page:1,method:'native',text:title+'\nBooking No.: NEWBOOK123\nShipper: A LTD\nConsignee: B LTD\nNotify Party: B LTD\nPort of Loading: SINGAPORE\nPort of Discharge: MOMBASA\nContainer Count: 2\nGross Weight: 12,345 KG'}]});
+ const docs=[doc('native-si','SHIPPING INSTRUCTIONS'),doc('native-bl','BILL OF LADING')];
+ const input={id:'different-mail',history:[],fields:{},classification:{category:'BL_COMPARISON',needsReview:false,provider:'human'}};
+ const cached=await runPipeline(input,docs,{}, {keepCategory:true});assert.equal(cached.fields.gross_weight_kg.reason,'separator_ambiguous');
+ // Simulate a reader recovering a line previously absent from the transcript,
+ // with the physical file identity unchanged. No expected answer enters code.
+ const reread=structuredClone(docs);for(const d of reread)d.pages[0].text='Weight number format: decimal separator point; thousands separator comma\n'+d.pages[0].text;
+ const current=await runPipeline(cached,reread,{}, {keepCategory:true});assert.equal(current.fields.gross_weight_kg.comparison,'MATCH');assert.equal(current.pipeline.status,'complete');assert.match(current.docs[0].pages[0].text,/Weight number format/);
+});

@@ -1,4 +1,23 @@
 import {exactDecimal} from './numbers.js';
+export function sourceNumberFormat(doc,field){
+ const page=doc.pages?.find(p=>p.page===field?.page);
+ if(page?.method!=='native')return null;
+ const declarations=[];
+ for(const line of page.text.split(/\r?\n/)){
+  const m=line.match(/^\s*(?:WEIGHT NUMBER FORMAT|NUMBER FORMAT FOR (?:ALL )?WEIGHTS)\s*[:：]\s*(.+)$/i);if(!m)continue;
+  const decimals=[...m[1].matchAll(/\bdecimal separator\s*(?:is|[:=])?\s*(comma|point|dot|[.,])(?=\s|;|$)/gi)];
+  const groups=[...m[1].matchAll(/\b(?:thousands|grouping) separator\s*(?:is|[:=])?\s*(comma|point|dot|[.,])(?=\s|;|$)/gi)];
+  const decimal=decimals[0],group=groups[0];
+  const symbol=x=>/^(comma|,)$/i.test(x)?',':'.';
+  if(decimals.length!==1||groups.length!==1||/\b(?:not|except|example|may|might)\b/i.test(m[1]))return {conflict:true,reason:'unverified_format_declaration',page:page.page,quote:line};
+  const d=symbol(decimal[1]),g=symbol(group[1]);
+  if(d===g)return {conflict:true,reason:'conflicting_format_declaration',page:page.page,quote:line};
+  declarations.push({profile:d==='.'?'en_comma':'de_dot',page:page.page,quote:line,scope:'weight_on_same_page'});
+ }
+ if(!declarations.length)return null;
+ if(new Set(declarations.map(d=>d.profile)).size!==1)return {conflict:true,reason:'conflicting_format_declaration',declarations};
+ return {...declarations[0],declarations};
+}
 export function sourceWeightUnit(doc,field){
  if(!/^\d[\d.,]*$/.test(String(field?.raw||'').trim()))return null;
  const raw=String(field.raw).trim(),escaped=raw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -7,6 +26,11 @@ export function sourceWeightUnit(doc,field){
  const label=String(field.quote||'').split(/[:：\t]/)[0];
  const units=[...new Set((label.match(/\b(?:KG|KGS|KILOGRAMS?|MT)\b/gi)||[]).map(u=>/^K/i.test(u)?'KG':'MT'))];
  if(units.length===1)return {unit:units[0],evidence:'Unit in the source field heading: '+label};
+ const page=doc.pages?.find(p=>p.page===field.page);
+ if(page?.method==='native'){
+  const stated=page.text.split(/\r?\n/).flatMap(line=>{const m=line.match(/^\s*All (?:gross )?weights (?:are )?(?:stated |expressed )?in (KG|KGS|KILOGRAMS?|MT|METRIC TONNES?|METRIC TONS?)\.?\s*$/i);return m?[{unit:/^K/i.test(m[1])?'KG':'MT',page:page.page,quote:line}]:[]});
+  if(stated.length&&new Set(stated.map(s=>s.unit)).size===1)return {...stated[0],evidence:'Explicit weight-unit declaration on the same source page.'};
+ }
  return null;
 }
 export function applySourceProfile(doc){

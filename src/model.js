@@ -8,6 +8,7 @@ export function mode(c){if(c.processing)return 'processing';if(c.processingError
 export function issue(c,k){return c.processingError||c.docIssue||(c.pairIssue?'pairing':null)||c.fields[k].scope_warning||(c.fields[k].comparison==='MATCH'?'match':c.fields[k].comparison==='MISMATCH'?'mismatch':c.fields[k].reason)||'evidence_not_located'}
 export const ISSUE={
  representation_not_stated:{title:'Confirm the represented party',body:'The company name agrees, but only one source names a company it represents. Confirm the missing relationship.',label:'Add relationship evidence',action:'support'},
+ number_profile_conflict:{title:'Number format evidence conflicts',body:'The source declaration and recorded format disagree, or the declaration is unclear. Check the original before deciding.',label:'Review format evidence',action:'resolve'},
  unsupported_number_format:{title:'Confirm this number’s notation',body:'This notation is not supported by the current strict parser. Check the original.',label:'Review source evidence',action:'resolve'},
  unsupported_number_profile:{title:'Confirm the source format',body:'Choose a supported format with source evidence.',label:'Review source evidence',action:'resolve'},
  processing_failed:{title:'Processing stopped',body:'Open Processing & original files for the failed stage and recovery details.',label:'Add source material',action:'support'},

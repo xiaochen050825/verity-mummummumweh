@@ -1,4 +1,5 @@
 import {norm} from './rules.js';
+import {messagePairEvidence} from './message-evidence.js';
 
 // Reference types are kept separate: an order number is not a booking number.
 export function sourceReferences(doc){
@@ -15,7 +16,7 @@ export function sourceReferences(doc){
  }
  return refs;
 }
-export function automaticPairEvidence(si,bl){
+export function automaticPairEvidence(si,bl,context){
  const a=sourceReferences(si),b=sourceReferences(bl),matches=[];
  for(const kind of ['booking','order','bl']){
   const av=[...new Set(a[kind].map(r=>r.value))],bv=[...new Set(b[kind].map(r=>r.value))];
@@ -25,5 +26,6 @@ export function automaticPairEvidence(si,bl){
    matches.push({kind,value:av[0],si:a[kind][0],bl:b[kind][0]});
   }
  }
- return matches.length?{ok:true,matches,si:a,bl:b}:{ok:false,reason:'no_shared_source_reference',si:a,bl:b};
+ if(matches.length)return {ok:true,method:'shared_source_reference',matches,si:a,bl:b};
+ return messagePairEvidence(si,bl,a,b,context)||{ok:false,reason:'no_shared_source_reference',si:a,bl:b};
 }

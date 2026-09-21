@@ -3,7 +3,7 @@ import {makeProvider,recoverNativeExtraction,ROUTE_VERSION} from './provider.js'
 import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='source-review-2026-09-21-5';
+export const PIPELINE_VERSION='native-evidence-2026-09-21-7';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
@@ -27,7 +27,11 @@ export async function runPipeline(original,documents,env={},options={}){
    if(doc.readError){extracted.push({...doc,side:null,fields:{},type:'UNREADABLE'});continue}
    const providerKey=provider.status.extraction+'/'+(provider.status.model||'parser')+'/'+(provider.status.ocrModel||'browser-ocr')+'/extract-3';
    const cached=original.docs?.find(d=>d.id===doc.id&&d.sha256===doc.sha256&&d.fields&&d.providerKey===providerKey);
-   const reading=cached?{...doc,pages:doc.pages.some(p=>p.blocks?.some(b=>b.cells?.some(c=>c.type==='number')))?doc.pages:cached.pages}:structuredClone(doc);
+   // Fresh native reading can contain newly recovered labels/declarations even
+   // without numeric cell metadata. Do not replace it with stale cached text.
+   // For image pages retain the server OCR transcript rather than reverting to
+   // a lower-quality browser OCR attempt on the same original bytes.
+   const reading=cached?{...doc,pages:doc.pages.map(p=>p.method==='native'?p:cached.pages.find(old=>old.page===p.page)||p)}:structuredClone(doc);
    if(!cached&&provider.status.ocrModel&&options.getPageImage)for(const page of reading.pages){
     if(page.method!=='ocr'||(page.confidence??100)>=85&&page.text.trim().length>=80)continue;
     const image=await options.getPageImage(reading,page);if(!image)continue;
@@ -52,8 +56,8 @@ export async function runPipeline(original,documents,env={},options={}){
    event(c,'Document pair confirmed',requestedPair.note);
   }
   else if(si.length===1&&bl.length===1){
-   c.pairEvidence=automaticPairEvidence(si[0],bl[0]);
-   if(c.pairEvidence.ok){[a,b]=[si[0],bl[0]];c.pairNote='Paired using source '+c.pairEvidence.matches.map(m=>m.kind+': '+m.value).join('; ');event(c,'Documents paired',c.pairNote)}
+   c.pairEvidence=automaticPairEvidence(si[0],bl[0],{subject:c.subject,body:c.body,documents:extracted});
+   if(c.pairEvidence.ok){[a,b]=[si[0],bl[0]];c.pairNote=c.pairEvidence.method==='current_email_attachment_link'?'Paired from the current email’s attachment declaration and BL reference.':'Paired using source '+c.pairEvidence.matches.map(m=>m.kind+': '+m.value).join('; ');event(c,'Documents paired',c.pairNote)}
   }
   if(!a||!b){c.pair=null;if(extracted.some(d=>d.readError)){
    const failed=extracted.find(d=>d.readError);

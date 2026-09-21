@@ -1,7 +1,7 @@
-import {sourceWeightUnit,sourceNumericCell} from './source-profile.js';
+import {sourceWeightUnit,sourceNumericCell,sourceNumberFormat} from './source-profile.js';
 import {parseNumber,invariantNumericComparison} from './numbers.js';
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.6';
+export const RULE_VERSION='verity-rules-1.7';
 export const PORT_VERSION='ports-curated-2';
 // Bounded comparison dictionary; code identities checked against UNECE 2025-1.
 // Source names and declared codes are checked separately. See docs/port-reference.md.
@@ -123,6 +123,8 @@ export function validateEvidence(field,doc,key){
 export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
  return Object.fromEntries(KEYS.map(key=>{
   const a=si.fields[key],b=bl.fields[key],av=validateEvidence(a,si,key),bv=validateEvidence(b,bl,key);
+  const declaredSI=key==='gross_weight_kg'&&av.ok?sourceNumberFormat(si,a):null,declaredBL=key==='gross_weight_kg'&&bv.ok?sourceNumberFormat(bl,b):null;
+  const profileSI=declaredSI?.profile||profiles.si,profileBL=declaredBL?.profile||profiles.bl;
   // Compare the source value, not a model's potentially truncated entity name.
   // A labelled heading is not part of raw; relationships inside raw are retained.
   const entityRaw=f=>{
@@ -134,13 +136,16 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
    return entityName(address&&raw.endsWith(address)?raw.slice(0,-address.length).trim():raw);
   };
   const entityField=['shipper','consignee','notify_party'].includes(key);
-  let x=av.ok?normalizeField(key,entityField?entityRaw(a):a.raw,profiles.si):av,y=bv.ok?normalizeField(key,entityField?entityRaw(b):b.raw,profiles.bl):bv;
+  let x=av.ok?normalizeField(key,entityField?entityRaw(a):a.raw,profileSI):av,y=bv.ok?normalizeField(key,entityField?entityRaw(b):b.raw,profileBL):bv;
   const unitSI=key==='gross_weight_kg'&&av.ok?sourceWeightUnit(si,a):null,unitBL=key==='gross_weight_kg'&&bv.ok?sourceWeightUnit(bl,b):null;
-  if(unitSI)x=normalizeField(key,a.raw+' '+unitSI.unit,profiles.si);
-  if(unitBL)y=normalizeField(key,b.raw+' '+unitBL.unit,profiles.bl);
+  if(unitSI)x=normalizeField(key,a.raw+' '+unitSI.unit,profileSI);
+  if(unitBL)y=normalizeField(key,b.raw+' '+unitBL.unit,profileBL);
   const numericSI=key==='gross_weight_kg'&&av.ok?sourceNumericCell(si,a):null,numericBL=key==='gross_weight_kg'&&bv.ok?sourceNumericCell(bl,b):null;
   if(numericSI)x=normalizeField(key,numericSI.value+' '+(unitSI?.unit||numericSI.unit||''),'en_comma');
   if(numericBL)y=normalizeField(key,numericBL.value+' '+(unitBL?.unit||numericBL.unit||''),'en_comma');
+  const conflict=(d,p)=>d?.conflict||d?.profile&&p!=='unset'&&p!==d.profile;
+  if(conflict(declaredSI,profiles.si))x=fail('AMBIGUOUS','number_profile_conflict');
+  if(conflict(declaredBL,profiles.bl))y=fail('AMBIGUOUS','number_profile_conflict');
   // A literal cross-reference may only resolve to a validated consignee in the same document.
   const reference=(doc,f,profile)=>{if(key==='notify_party'&&/^SAME AS CONSIGNEE$/i.test(norm(f?.raw))){const c=doc.fields.consignee;return validateEvidence(c,doc).ok?normalizeField('consignee',c.raw,profile):fail('AMBIGUOUS','entity_identity')}return null};
   if(av.ok)x=reference(si,a,profiles.si)||x;if(bv.ok)y=reference(bl,b,profiles.bl)||y;
@@ -180,6 +185,7 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
   if(representationIncomplete)qa.push({rule:'represented_party_completeness',status:'flag',reason:'One source names a represented party; the other does not. Identity agreement is not assumed.'});
   if(key==='gross_weight_kg')qa.push({rule:'numeric_interpretations',status:numericDecision?'pass':'flag',decision:numericDecision,si:x.candidates||[],bl:y.candidates||[],sourceSI:numericSI,sourceBL:numericBL,comparisonPolicy:'exact_decimal_no_rounding_tolerance'});
   if(unitSI||unitBL)qa.push({rule:'source_unit',status:'pass',si:unitSI,bl:unitBL});
+  if(declaredSI||declaredBL)qa.push({rule:'explicit_source_number_format',status:conflict(declaredSI,profiles.si)||conflict(declaredBL,profiles.bl)?'flag':'pass',si:declaredSI,bl:declaredBL});
   return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,numeric_candidates:key==='gross_weight_kg'?{si:x.candidates||[],bl:y.candidates||[]}:undefined,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,source_warnings:portDecision&&bad?[bad.reason]:[],issues:(bad&&!portDecision&&!numericDecision||representationIncomplete)?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
  }));
 }
