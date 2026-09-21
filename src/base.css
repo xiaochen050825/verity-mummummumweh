@@ -4,6 +4,12 @@
 @media(min-width:1001px){.detail{position:sticky;top:0;height:calc(100vh - 1px);max-height:100vh;align-self:start;overflow-y:auto}}
 
 .export-layout>*,.split-uneven>*,.review-grid>*{min-width:0}
+.review-evidence{margin:24px 0;padding:20px;border:1px solid #e6e8eb;border-radius:14px;background:#fafbfb}
+.evidence-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.evidence-columns article{min-width:0}.evidence-columns strong,.evidence-columns blockquote{overflow-wrap:anywhere}
+.evidence-columns blockquote{margin:6px 0 14px;padding:8px 12px;border-left:3px solid #f05a50;background:white;white-space:pre-wrap}
+.weight-choices{border:0;margin:16px 0;padding:0;display:grid;gap:8px}.weight-choices legend{margin-bottom:8px;font-weight:600}.weight-choices .pick-card{margin:0;min-width:0}.weight-choices .pick-card span{min-width:0;overflow-wrap:anywhere}
+@media(max-width:700px){.evidence-columns{grid-template-columns:1fr}}
 .review-grid .paper{height:clamp(360px,calc(100vh - 450px),620px);min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#d6dae0 transparent}
 .review-grid .paper .paper-row{scroll-margin:20px}
 @media(max-width:700px){.review-grid .paper{height:420px}.export-layout .panel{max-width:100%}}

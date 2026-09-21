@@ -5,6 +5,7 @@ import {Button,Fold,Modal,SaveFooter} from './components.jsx';
 import {api,cloudFile,processCase,uploadFile} from './api.js';
 import {readDocument,releaseReader} from './reader.js';
 import {toast} from 'sonner';
+import {WeightChoices} from './evidence-review.jsx';
 export function LiveCasePanel({record,batch,onUpdate}){
  const current=(record.docs||[]).map(applySourceProfile),all=[...(batch?.files||[]),...(record.supportFiles||[])].filter((v,i,a)=>!v.name.endsWith('.json')&&a.findIndex(f=>f.id===v.id)===i);
  const [selected,setSelected]=useState(current.map(d=>d.id)),[profiles,setProfiles]=useState(Object.fromEntries(current.map(d=>[d.id,d.numberProfile||'unset']))),[notes,setNotes]=useState(Object.fromEntries(current.map(d=>[d.id,d.profileEvidence||'']))),[busy,setBusy]=useState(false),[progress,setProgress]=useState(''),[error,setError]=useState('');
@@ -33,6 +34,6 @@ export function LiveNumberFormat({record,close,onUpdate}){
   if(!Object.values(choices).some(c=>c.profile!=='unset'))throw Error('Confirm at least one source format, or leave this issue unresolved.');
   const updated=await processCase(record,confirmedFormats(docs,choices),{keepCategory:true});onUpdate(updated);close();toast.success('Formats recorded. Comparison recalculated from the sources.');
  }catch(e){setError(e.message);setBusy(false)}}}>
- {paired.map(d=><div key={d.id} className="field-label"><strong>{d.side?.toUpperCase()} · {d.name}</strong><p>{d.fields?.gross_weight_kg?.quote||'Open the original to check the weight.'}</p><a href={'/api/files/'+encodeURIComponent(d.id)} download>Open original</a><select aria-label={'Weight number format for '+d.name} value={choices[d.id].profile} onChange={e=>change(d.id,'profile',e.target.value)}><option value="unset">Still unknown</option><option value="en_comma">Decimal point · example 1,234.56</option><option value="de_dot">Decimal comma · example 1.234,56</option></select>{choices[d.id].profile!=='unset'&&<input required minLength={8} aria-label={'Evidence for '+d.name} placeholder="Page, format statement or sender confirmation" value={choices[d.id].note} onChange={e=>change(d.id,'note',e.target.value)}/>}</div>)}
+ {paired.map(d=><div key={d.id} className="field-label"><strong>{d.side?.toUpperCase()} · {d.name}</strong><p>{d.fields?.gross_weight_kg?.quote||'Open the original to check the weight.'}</p><a href={'/api/files/'+encodeURIComponent(d.id)} download>Open original</a><WeightChoices doc={d} value={choices[d.id].profile} onChange={value=>change(d.id,'profile',value)}/>{choices[d.id].profile!=='unset'&&<input required minLength={8} aria-label={'Evidence for '+d.name} placeholder="Page, format statement or sender confirmation" value={choices[d.id].note} onChange={e=>change(d.id,'note',e.target.value)}/>}</div>)}
  {error&&<p role="alert" className="form-error">{error}</p>}<SaveFooter busy={busy} onCancel={close}/></form></Modal>
 }

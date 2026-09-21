@@ -126,7 +126,14 @@ export function makeProvider(env,fetcher=fetch){
    const fallback=await classifyStandard(email);
    return {...fallback,routingProvider:'jev',routingFallback:{from:'jev',reason:failure?'provider_failure':'uncertain_decision',errorCode:failure?.code||null,category:routed?.category||null,confidence:routed?.confidence??null,comparisonIntent:routed?.comparisonIntent??null},reason:'Jev required a fallback. '+fallback.reason};
   },
-  async extract(doc){return status.mode==='local-rules'?localExtract(doc):recoverNativeExtraction(doc,{...await call(Extraction,extractionPrompt,{name:doc.name,pages:doc.pages}),provider:'api'})},
+  async extract(doc,images){
+   if(status.mode==='local-rules')return localExtract(doc);
+   // For scans read the original independently; do not seed the vision model
+   // with the OCR transcript. Validation compares its evidence with that text.
+   const input=images?.length?{name:doc.name,pages:doc.pages.map(p=>p.method==='ocr'?{page:p.page,scan:true}:p)}:{name:doc.name,pages:doc.pages};
+   const instruction=images?.length?extractionPrompt+' Read scanned pages from the original images independently. Images follow the scan-page order. Never reconstruct unreadable company names from familiarity. Mark unclear characters or fields AMBIGUOUS. Native pages, if any, are included as text.':extractionPrompt;
+   return recoverNativeExtraction(doc,{...await call(Extraction,instruction,input,images),provider:'api'});
+  },
   async reread(doc,keys,image){if(status.mode!=='api'||!image)return null;const result=await call(Extraction,extractionPrompt+' Read the attached original images directly. Focus on these fields: '+keys.join(',')+'. Do not infer characters from company or port familiarity. If a character cannot be read, use AMBIGUOUS. No previous OCR transcript is supplied; the image is the source.',{pages:doc.pages.map(p=>({page:p.page}))},image);return result.fields}
  };
 }

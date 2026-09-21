@@ -19,7 +19,7 @@ export default {async fetch(req,env){
   const origin=req.headers.get('origin'),localPreview=env.LOCAL_DEV==='true'&&['127.0.0.1','localhost'].includes(url.hostname)&&origin==='http://127.0.0.1:5178';
   if(!['GET','HEAD'].includes(req.method)&&!localPreview&&(req.headers.get('sec-fetch-site')==='cross-site'||origin&&origin!==url.origin))return reply({error:'Cross-origin write rejected.'},403);
   if(!env.DB||!env.BUCKET)return reply({error:'Workspace storage is unavailable.'},503);
-  if(url.pathname==='/api/status')return reply({...providerStatus(env),storage:'cloud',ocr:'tesseract-eng',rules:RULE_VERSION});
+  if(url.pathname==='/api/status'){const status=providerStatus(env);return reply({...status,storage:'cloud',ocr:status.ocrModel||'unavailable',rules:RULE_VERSION})}
   if(url.pathname==='/api/workspace'&&req.method==='GET'){
    const [b,c]=await Promise.all([env.DB.prepare('SELECT data FROM batches WHERE owner=? ORDER BY created DESC').bind(owner).all(),env.DB.prepare('SELECT data,revision FROM cases WHERE owner=?').bind(owner).all()]);return reply({batches:b.results.map(x=>JSON.parse(x.data)),cases:c.results.map(x=>({...JSON.parse(x.data),revision:x.revision,server:true}))});
   }

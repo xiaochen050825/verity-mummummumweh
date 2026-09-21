@@ -117,7 +117,10 @@ export function validateEvidence(field,doc,key){
  if(!p||!field.quote||!(field.readMethod==='vision_reread'&&p.imageId||norm(p.text).includes(norm(field.quote)))||!norm(field.quote).includes(norm(field.raw)))return fail('UNREADABLE','evidence_not_located');
  if(field.entity&&Object.values(field.entity).some(v=>v&&!norm(field.raw).toUpperCase().includes(norm(v).toUpperCase())&&!norm(field.quote).toUpperCase().includes(norm(v).toUpperCase())))return fail('UNREADABLE','evidence_not_located');
  if(field.readMethod==='vision_reread'&&p.imageId)return good(field.raw);
- if(p.method==='ocr'&&(p.confidence??0)<80)return fail('UNREADABLE','scan_illegible');
+ // A server OCR transcript is not scored by the older browser OCR confidence.
+ // It must still contain the labelled quote/value and belong to these bytes.
+ const serverRead=!!p.ocrEngine&&!!doc.sha256&&p.ocrSourceHash===doc.sha256;
+ if(p.method==='ocr'&&!serverRead&&(p.confidence??0)<80)return fail('UNREADABLE','scan_illegible');
  return good(field.raw);
 }
 export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){

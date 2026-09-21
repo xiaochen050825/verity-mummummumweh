@@ -1,9 +1,10 @@
 import {KEYS,blankFields,compareDocuments,normalizeField,validateEvidence,norm,RULE_VERSION,PORT_VERSION} from './rules.js';
-import {makeProvider,recoverNativeExtraction,ROUTE_VERSION} from './provider.js';
+import {makeProvider,localExtract,recoverNativeExtraction,ROUTE_VERSION} from './provider.js';
 import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
+import {contextReadReason} from './review-evidence.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='native-evidence-2026-09-21-7';
+export const PIPELINE_VERSION='glm-primary-2026-09-21-9';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
@@ -21,7 +22,10 @@ export async function runPipeline(original,documents,env={},options={}){
   c.classificationOnly=c.category==='BL_COMPARISON'&&!documents.length&&!(c.attachments||[]).length&&/\b(?:assist\s+to\s+)?(?:send|provide|share|forward)\s+(?:us\s+)?(?:the\s+)?(?:draft\s+)?(?:b\/?l|bill of lading)\b/i.test(current)&&!/\b(?:compare|verify|check)\b/i.test(current);
   if(c.classificationOnly){c.fields={};stage('complete');event(c,'Request classified','Draft BL requested; no SI/BL comparison was performed.');return c}
   if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete');return c}
-  stage('extracting');const extracted=[];
+  stage('extracting');const extracted=[];let contextReads=0;
+  const preflight=documents.filter(d=>!d.readError).map(d=>({...d,...localExtract(d)}));
+  const previewSI=preflight.filter(d=>d.type==='SI'),previewBL=preflight.filter(d=>d.type==='BL');
+  const pairContextUnresolved=!!original.pairIssue||(documents.length===2&&previewSI.length===1&&previewBL.length===1&&!automaticPairEvidence(previewSI[0],previewBL[0],{subject:c.subject,body:c.body,documents:preflight.map(d=>({...d,side:d.type==='SI'?'si':'bl'}))}).ok);
   for(const input of documents){
    const doc=applySourceProfile(input);
    if(doc.readError){extracted.push({...doc,side:null,fields:{},type:'UNREADABLE'});continue}
@@ -31,18 +35,44 @@ export async function runPipeline(original,documents,env={},options={}){
    // without numeric cell metadata. Do not replace it with stale cached text.
    // For image pages retain the server OCR transcript rather than reverting to
    // a lower-quality browser OCR attempt on the same original bytes.
-   const reading=cached?{...doc,pages:doc.pages.map(p=>p.method==='native'?p:cached.pages.find(old=>old.page===p.page)||p)}:structuredClone(doc);
-   if(!cached&&provider.status.ocrModel&&options.getPageImage)for(const page of reading.pages){
-    if(page.method!=='ocr'||(page.confidence??100)>=85&&page.text.trim().length>=80)continue;
-    const image=await options.getPageImage(reading,page);if(!image)continue;
-    const transcript=await provider.ocrPage(image);
-    if(transcript){page.browserOcrText=page.text;page.text=transcript;page.ocrEngine=provider.status.ocrModel}
+   const reading=structuredClone(cached?{...doc,pages:doc.pages.map(p=>p.method==='native'?p:cached.pages.find(old=>old.page===p.page)||p)}:doc);
+   if(reading.pages.some(p=>p.method==='ocr'&&!p.text.trim())&&(!provider.status.ocrModel||!options.getPageImage)){const e=Error('GLM OCR is required to read these scans. Configure the OCR service and retry.');e.code='OCR_UNAVAILABLE';throw e}
+   const beforeContext=structuredClone(reading);let refreshed=false;const pageImages=new Map();
+   if(provider.status.ocrModel&&options.getPageImage)for(const page of reading.pages){
+    const reason=contextReadReason(cached||{...reading,...localExtract(reading)},page,pairContextUnresolved);
+    const initial=(!cached||!page.text.trim())&&page.method==='ocr'&&!page.ocrEngine&&((page.confidence??100)<85||page.text.trim().length<80);
+    if(!initial&&(!reason||contextReads>=2||cached?.contextReadAttempts?.some(a=>a.page===page.page&&a.sha256===doc.sha256)))continue;
+    const image=await options.getPageImage(reading,page);if(!image){if(initial&&!page.text.trim()){const e=Error('The original page image is unavailable for OCR. Add a readable source and retry.');e.code='OCR_UNAVAILABLE';throw e}continue}
+    pageImages.set(page.page,image);
+    if(!initial){contextReads++;reading.contextReadAttempts=[...(reading.contextReadAttempts||cached?.contextReadAttempts||[]),{page:page.page,sha256:doc.sha256,reason,status:'started'}]}
+    try{
+     const transcript=await provider.ocrPage(image);
+     if(transcript){page.browserOcrText=page.text;page.text=transcript;page.ocrEngine=provider.status.ocrModel;page.ocrSourceHash=doc.sha256;refreshed=true}
+     if(!initial)reading.contextReadAttempts.at(-1).status='read';
+    }catch(e){
+     if(initial)throw e;
+     reading.contextReadAttempts.at(-1).status='failed';reading.contextReadAttempts.at(-1).errorCode=e.code||'OCR_FAILED';
+     event(c,'Additional reading unavailable','Existing findings retained; source evidence still needs review.');
+    }
    }
-   const result=recoverNativeExtraction(reading,cached||await provider.extract(reading));const full=reading.pages.map(p=>p.text).join('\n');
+   let extraction;
+   try{
+    const images=[];
+    const scans=reading.pages.filter(p=>p.method==='ocr');
+    if((!cached||refreshed)&&options.getPageImage&&scans.every(p=>p.ocrEngine&&p.ocrSourceHash===doc.sha256))for(const p of scans){const image=pageImages.get(p.page)||await options.getPageImage(reading,p);if(!image){const e=Error('A scan image is missing for independent extraction. Add the original and retry.');e.code='OCR_UNAVAILABLE';throw e}images.push(image)}
+    extraction=cached&&!refreshed?cached:await provider.extract(reading,images.length?images:undefined);
+    if(images.length){reading.rereadRound=1;reading.independentScanRead=true}
+   }catch(e){
+    if(!cached||!refreshed)throw e;
+    reading.pages=beforeContext.pages;extraction=cached;
+    for(const attempt of reading.contextReadAttempts||[])if(attempt.status==='read'){attempt.status='extraction_failed';attempt.errorCode=e.code||'EXTRACTION_FAILED'}
+    event(c,'Additional extraction unavailable','Previous evidence retained for review.');
+   }
+   const result=recoverNativeExtraction(reading,extraction);const full=reading.pages.map(p=>p.text).join('\n');
    const booking=result.booking&&result.bookingQuote&&norm(full).includes(norm(result.bookingQuote))&&norm(result.bookingQuote).includes(norm(result.booking))?result.booking:null;
-   extracted.push({...reading,...result,pages:reading.pages,booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,profileSource:doc.profileSource,providerKey});c.docs=[...extracted];
+   extracted.push({...reading,...result,pages:reading.pages,...(reading.contextReadAttempts?{contextReadAttempts:reading.contextReadAttempts}:{}),booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,profileSource:doc.profileSource,providerKey});c.docs=[...extracted];
   }
-  c.docs=extracted;stage('pairing');const si=extracted.filter(d=>d.side==='si'),bl=extracted.filter(d=>d.side==='bl');
+  c.docs=extracted;c.pipeline.contextReads=contextReads;stage('pairing');const si=extracted.filter(d=>d.side==='si'),bl=extracted.filter(d=>d.side==='bl');
   const previous=original.pairConfirmation;
   const unchangedConfirmation=previous&&previous.siHash&&previous.blHash&&si.some(d=>d.id===previous.si&&d.sha256===previous.siHash)&&bl.some(d=>d.id===previous.bl&&d.sha256===previous.blHash);
   const requestedPair=options.pair||(unchangedConfirmation?previous:null);
@@ -85,7 +115,7 @@ export async function runPipeline(original,documents,env={},options={}){
   }
   c.pipeline.finishedAt=new Date().toISOString();stage(Object.values(c.fields).every(f=>f.comparison==='MATCH'&&!f.scope_warning)?'complete':'review');
   event(c,'Seven fields checked',`Rules ${RULE_VERSION}; independent ${provider.status.mode} extraction. Original evidence retained.`);
- }catch(e){c.processingError=['AI_TRANSIENT','TimeoutError'].includes(e.code||e.name)?'service_timeout':'processing_failed';c.processingDetail=e.message;c.pipeline.validationIssues=e.validationIssues||null;c.pipeline.failedStage=c.pipeline.status;stage('failed');event(c,'Processing failed',e.message)}
+ }catch(e){c.processingError=e.code==='OCR_UNAVAILABLE'?'ocr_unavailable':['AI_TRANSIENT','TimeoutError'].includes(e.code||e.name)?'service_timeout':'processing_failed';c.processingDetail=e.message;c.pipeline.validationIssues=e.validationIssues||null;c.pipeline.failedStage=c.pipeline.status;stage('failed');event(c,'Processing failed',e.message)}
  return c;
 }
 export function reviewAction(original,action,p={}){
