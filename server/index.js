@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {runPipeline,reviewAction} from '../engine/pipeline.js';
+import {runPipeline,reviewAction,PIPELINE_VERSION} from '../engine/pipeline.js';
 import {providerStatus} from '../engine/provider.js';
 import {importEmails,buildReport} from '../src/model.js';
 import {competitionOutput,diagnostics} from '../engine/export.js';
@@ -55,14 +55,14 @@ export default {async fetch(req,env){
    }
    if(!Array.isArray(input.documents)||input.documents.length>12)throw Error('Choose at most 12 document candidates.');
    const docs=[];for(const raw of input.documents){const d=Input.parse(raw);const f=await fileMeta(env,owner,d.id);for(const p of d.pages)if(p.imageId)await fileMeta(env,owner,p.imageId);docs.push(applySourceProfile({...d,numberProfile:d.numberProfile||'unset',name:f.name,sha256:f.sha256,size:f.size,server:true}))}
-   const fingerprint=docs.map(d=>d.sha256+':'+d.numberProfile).sort().join('|'),sameSource=c.sourceFingerprint===fingerprint;
-   if(c.processingError==='processing_failed'&&sameSource)throw Error('The provider or output contract needs correction. This failed request cannot be repeated on unchanged sources.');
-   if(c.processingError&&sameSource&&c.retries>=1)throw Error('This source version has reached its retry limit. Add new source material.');
+   const fingerprint=docs.map(d=>d.sha256+':'+d.numberProfile).sort().join('|'),sameSource=c.sourceFingerprint===fingerprint,sameEngine=c.pipeline?.engineVersion===PIPELINE_VERSION;
+   if(c.processingError==='processing_failed'&&sameSource&&sameEngine)throw Error('The provider or output contract needs correction. This failed request cannot be repeated on unchanged sources.');
+   if(c.processingError&&sameSource&&sameEngine&&c.retries>=1)throw Error('This source version has reached its retry limit. Add new source material.');
    // Persist the exact reading before external requests, so reload/retry never needs fabricated evidence.
    for(const d of docs)if(d.numberProfile!=='unset'&&!d.profileEvidence?.trim())throw Error('A number-format setting needs source evidence.');
    let reading=structuredClone(c);reading.sourceInputs=docs;reading.processingError=null;reading.pipeline={...c.pipeline,status:'processing',startedAt:new Date().toISOString()};reading=await saveCase(env,owner,reading,c.revision);
    const out=await runPipeline(reading,docs,env,{keepCategory:input.keepCategory,pair:input.pair,getPageImage:async(doc,page)=>{const imageId=page?.imageId;if(!imageId)return null;const f=await fileMeta(env,owner,imageId);if(!/^image\/(png|jpeg)$/.test(f.type)||f.size>2_000_000)return null;const obj=await env.BUCKET.get(owner+'/'+imageId);const bytes=new Uint8Array(await obj.arrayBuffer());let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return 'data:'+f.type+';base64,'+btoa(s)}});
-   out.retries=c.processingError&&sameSource?(c.retries||0)+1:0;out.sourceFingerprint=fingerprint;return reply(await saveCase(env,owner,out,reading.revision));
+   out.retries=c.processingError&&sameSource&&sameEngine?(c.retries||0)+1:0;out.sourceFingerprint=fingerprint;return reply(await saveCase(env,owner,out,reading.revision));
   }
   if(url.pathname==='/api/export'&&req.method==='GET'){
    const rows=await env.DB.prepare('SELECT data FROM cases WHERE owner=?').bind(owner).all(),b=await env.DB.prepare('SELECT data FROM batches WHERE owner=?').bind(owner).all(),cases=rows.results.map(r=>JSON.parse(r.data));return reply({...buildReport(cases,b.results.map(r=>JSON.parse(r.data))),diagnostics:diagnostics(cases),competition:competitionOutput(cases)});

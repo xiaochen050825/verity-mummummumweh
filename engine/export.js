@@ -13,7 +13,7 @@ export function competitionOutput(cases,expectedIds=cases.map(c=>c.emailId||c.id
   if(reason){blocked.push({email_id:id,reason});continue}
   let reviewReason=null;
   if(!diff.length){
-   reviewReason=c.docIssue==='wrong_type'?'wrong_doc_type':['missing_si','missing_bl'].includes(c.docIssue)?'missing_attachment':null;
+   reviewReason=c.docIssue==='wrong_type'?'wrong_doc_type':c.docIssue==='unreadable_file'?'unreadable':['missing_si','missing_bl'].includes(c.docIssue)?'missing_attachment':null;
    if(!reviewReason&&unknown.length){const reasons=new Set(unknown.map(f=>f.kind==='MISSING'?'missing_value':f.kind==='UNREADABLE'?'unreadable':null));if(reasons.size===1&&!reasons.has(null))reviewReason=[...reasons][0];else {blocked.push({email_id:id,reason:'Ambiguity or multiple review reasons have no confirmed official mapping.'});continue}}
   }
   if(!reviewReason&&fields.length!==7){blocked.push({email_id:id,reason:'Seven checked fields are required.'});continue}

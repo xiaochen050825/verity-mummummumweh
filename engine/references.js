@@ -1,5 +1,4 @@
 import {norm} from './rules.js';
-import {isRegisteredSource} from './source-profile.js';
 
 // Reference types are kept separate: an order number is not a booking number.
 export function sourceReferences(doc){
@@ -12,9 +11,7 @@ export function sourceReferences(doc){
    if(/^(?:REFERENCE|NUMBER|NONE|MISSING|UNKNOWN)$/i.test(m[1]))continue;
    refs[kind].push({value:norm(m[1]).toUpperCase(),quote:m[0],page:page.page});
   }
-  // The supplied renderer explicitly places so_number in the title's second
-  // spreadsheet cell. Apply that convention only to registered source bytes.
-  if(page.method==='native'&&isRegisteredSource(doc))for(const m of page.text.matchAll(/^(?:BL INSTRUCTION|BILL OF LADING)\t+(\d{6,})[ \t]*$/gim))refs.order.push({value:m[1],quote:m[0],page:page.page,convention:'data_v2/render.py:179 so_number'});
+
  }
  return refs;
 }

@@ -16,6 +16,7 @@ async function office(file,kind){const {default:JSZip}=await import('jszip');con
 export async function readDocument(meta,onProgress){
  const file=await cloudFile(meta),head=new Uint8Array(await file.slice(0,8).arrayBuffer()),ext=file.name.split('.').pop().toLowerCase();let pages=[];
  try{
+  if(ext==='pdf'&&file.size===0)throw Error('The PDF file is empty, i.e. its size is zero bytes.');
   if(String.fromCharCode(...head.slice(0,4))==='%PDF'){
    const pdfjs=await import('pdfjs-dist');pdfjs.GlobalWorkerOptions.workerSrc=new URL('pdfjs-dist/build/pdf.worker.min.mjs',import.meta.url).href;
    const task=pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false}),pdf=await task.promise;

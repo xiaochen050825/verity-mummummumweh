@@ -1,6 +1,6 @@
 import {sourceWeightUnit} from './source-profile.js';
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.2';
+export const RULE_VERSION='verity-rules-1.4';
 export const PORT_VERSION='ports-curated-2';
 // Bounded comparison dictionary; code identities checked against UNECE 2025-1.
 // Source names and declared codes are checked separately. See docs/port-reference.md.
@@ -150,8 +150,8 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
   if(av.ok)x=reference(si,a,profiles.si)||x;if(bv.ok)y=reference(bl,b,profiles.bl)||y;
   // Identical validated company blocks cannot become different through splitting.
   // Cross-references must first resolve within each document, never by raw equality.
-  const sameEntitySource=entityField&&av.ok&&bv.ok&&x.ok&&y.ok&&norm(a.raw)===norm(b.raw)&&!/^SAME AS CONSIGNEE$/i.test(norm(a.raw));
-  if(sameEntitySource){x=good(name(a.raw));y=good(name(b.raw))}
+  const sameEntitySource=entityField&&av.ok&&bv.ok&&x.ok&&y.ok&&entityName(a.raw)===entityName(b.raw)&&!/^SAME AS CONSIGNEE$/i.test(norm(a.raw));
+  if(sameEntitySource){x=good(entityName(a.raw));y=good(entityName(b.raw))}
   const bad=!x.ok?x:!y.ok?y:null;
   let comparison=bad?null:x.value===y.value?'MATCH':'MISMATCH',reason=bad?.reason||null,kind=bad?.kind||null;
   // A code/name inconsistency inside a source must not hide a demonstrable

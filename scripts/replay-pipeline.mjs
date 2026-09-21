@@ -13,7 +13,8 @@ for(const file of readdirSync(join(input,'cases')).filter(f=>f.endsWith('.json')
  let c=before;
  // Failed or incomplete model responses require a real provider retry. Never
  // substitute invented extraction results for those cases during this replay.
- if(!before.processingError){
+ const knownDamagedPDF=before.processingError==='unsupported_format'&&before.docs?.some(d=>/\.pdf$/i.test(d.name)&&/^(?:Invalid PDF structure\.?|The PDF file is empty, i\.e\. its size is zero bytes\.)$/i.test(d.readError||''));
+ if(!before.processingError||knownDamagedPDF){
   c=await runPipeline(before,before.docs||[],{GRAFILAB_API_KEY:'offline-not-a-key'},{keepCategory:true,fetcher:async()=>{throw Error('OFFLINE_REPLAY_CACHE_MISS')}});
   if(c.processingDetail?.includes('OFFLINE_REPLAY_CACHE_MISS')){c=before;skipped.push(before.id)}
  }else skipped.push(before.id);

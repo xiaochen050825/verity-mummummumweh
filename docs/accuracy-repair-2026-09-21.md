@@ -1,3 +1,5 @@
+> Historical report: the dataset-specific format registry described below was removed on 2026-09-21. Its metrics are superseded by the v10 audit in recovery-validation-2026-09-21.md.
+
 # Rules 1.1: source-grounded comparison repairs
 
 The frozen 520-email API run was replayed offline with the original independent

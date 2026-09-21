@@ -51,7 +51,7 @@ test('low-confidence scanned page uses Grafilab OCR once and keeps the browser t
  const fetcher=async(url,opts)=>{const request=JSON.parse(opts.body);
   if(request.model==='grafilab/glm-ocr'){ocrCalls++;return Response.json({choices:[{message:{content:text('SHIPPING INSTRUCTIONS')}}]})}
   if(request.messages[0].content.includes('BL_COMPARISON requires'))return Response.json({choices:[{message:{content:JSON.stringify({category:'BL_COMPARISON',quote:'Please check the draft BL against the SI.',reason:'Explicit request',needsReview:false})}}]});
-  extractCalls++;const source=JSON.parse(request.messages[1].content[0].text),result=localExtract(source);delete result.provider;
+  extractCalls++;const source=JSON.parse(request.messages[1].content[0].text),result=localExtract(request.messages[1].content.some(c=>c.type==='image_url')?doc('SHIPPING INSTRUCTIONS'):source);delete result.provider;
   return Response.json({choices:[{message:{content:JSON.stringify(result)}}]})};
  const opts={fetcher,getPageImage:async()=> 'data:image/png;base64,dGVzdA=='};
  let checked=await runPipeline(base(),[si,bl],env,opts);assert.equal(checked.pipeline.status,'complete');assert.equal(checked.docs[0].pages[0].ocrEngine,'grafilab/glm-ocr');assert.match(checked.docs[0].pages[0].browserOcrText,/Shipper: \?/);assert.equal(ocrCalls,1);assert.equal(checked.pipeline.rereads,1);assert.equal(extractCalls,3);
@@ -79,7 +79,7 @@ test('visual recovery is one targeted round, independent and cached',async()=>{
  const si=doc('SHIPPING INSTRUCTIONS'),bl=doc('BILL OF LADING');si.pages[0].imageId='raster';si.pages[0].method='ocr';si.pages[0].confidence=95;
  const fetcher=async(url,opts)=>{const data=JSON.parse(opts.body),system=data.messages[0].content,input=JSON.parse(data.messages[1].content[0].text);let result;
   if(system.includes('BL_COMPARISON requires'))result={category:'BL_COMPARISON',quote:'Please check the draft BL against the SI.',reason:'Explicit request',needsReview:false};
-  else {result=localExtract(input);delete result.provider;if(system.includes('Reconsider only')){visualCalls++;assert.equal(input.name,si.name)}else {extractCalls++;if(input.name===si.name)result.fields.gross_weight_kg={raw:'misread',quote:'misread',page:1,status:'OK'}}}
+  else {const visual=data.messages[1].content.some(c=>c.type==='image_url');result=localExtract(visual?si:input);delete result.provider;if(visual){visualCalls++;assert.deepEqual(input,{pages:[{page:1}]})}else {extractCalls++;if(input.name===si.name)result.fields.gross_weight_kg={raw:'misread',quote:'misread',page:1,status:'OK'}}}
   return Response.json({choices:[{message:{content:JSON.stringify(result)}}]})};
  let c=await runPipeline(base(),[si,bl],env,{fetcher,getPageImage:async()=> 'data:image/png;base64,dGVzdA=='});assert.equal(visualCalls,1);assert.equal(extractCalls,2);assert.equal(c.fields.gross_weight_kg.comparison,'MATCH');
  c=await runPipeline(c,[si,bl],env,{fetcher,getPageImage:async()=> 'data:image/png;base64,dGVzdA=='});assert.equal(visualCalls,1);assert.equal(extractCalls,2)

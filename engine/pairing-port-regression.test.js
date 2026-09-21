@@ -57,8 +57,31 @@ test('complete slash expression is retained; matching source is not a real-world
 });
 test('cache recovery takes effect in the actual pipeline without a model call',async()=>{
  const si=doc('BILL OF LADING INSTRUCTION\nBOOKING NO.: BK-2222'),bl=doc('BILL OF LADING\nBOOKING NO.: BK-2222');
- const cached=[si,bl].map((d,i)=>({...d,...localExtract(d),sha256:d.id,type:i?'BL':'AMBIGUOUS',providerKey:'grafilab/gemini/gemini-3.5-flash-lite/grafilab/glm-ocr/extract-2'}));
+ const cached=[si,bl].map((d,i)=>({...d,...localExtract(d),sha256:d.id,type:i?'BL':'AMBIGUOUS',providerKey:'grafilab/gemini/gemini-3.5-flash-lite/grafilab/glm-ocr/extract-3'}));
  const before={id:'test',history:[],fields:{},docs:cached,classification:{category:'BL_COMPARISON',needsReview:false,reason:'Compare',provider:'human'}};
  const result=await runPipeline(before,cached,{GRAFILAB_API_KEY:'test'},{keepCategory:true,fetcher:async()=>{throw Error('Cache should avoid paid calls')}});
  assert.equal(result.pair.si,si.id);assert.equal(result.pairEvidence.ok,true);
+});
+
+test('unlabelled spreadsheet units and title numbers remain unknown for every file identity',()=>{
+ for(const identity of [
+  {id:'email_005',name:'email_005_SI.xlsx',sha256:'004468bfffe447312fee7da32951723a06013b00a58c46a1a5facbe5e9583dd1'},
+  {id:'new-batch-message',name:'unseen.xlsx',sha256:'unseen-hash'}
+ ]){
+  const si={...doc('BL INSTRUCTION\t1234567890'),...identity};
+  const bl={...doc('BILL OF LADING\t1234567890'),...identity};
+  assert.equal(sourceWeightUnit(si,{raw:'23702',quote:'Gross Weight: 23702'}),null);
+  assert.deepEqual(sourceReferences(si).order,[]);
+  assert.equal(automaticPairEvidence(si,bl).ok,false);
+ }
+});
+
+test('typed reference pairing generalizes to new identifiers and rejects counterexamples',()=>{
+ for(let i=0;i<40;i++){
+  const ref='NEW-'+(900001+i),a=doc('ORDER NO.: '+ref),b=doc('ORDER NO.: '+ref);
+  a.name='never-seen-'+i+'.pdf';b.name='different-'+i+'.xlsx';
+  assert.equal(automaticPairEvidence(a,b).ok,true);
+  assert.equal(automaticPairEvidence(a,doc('ORDER NO.: OTHER-'+i)).ok,false);
+  assert.equal(automaticPairEvidence(a,doc('BOOKING NO.: '+ref)).ok,false);
+ }
 });
