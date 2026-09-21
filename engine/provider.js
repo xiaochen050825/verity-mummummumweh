@@ -133,7 +133,11 @@ export function makeProvider(env,fetcher=fetch){
    let routed,failure;
    try{routed=await classifyJev(email);if(!routed.needsReview)return routed}catch(e){failure=e}
    if(!api){if(failure)throw failure;return routed}
-   const fallback=await classifyStandard(email);
+   let fallback;
+   try{fallback=await classifyStandard(email)}catch(error){
+    const message=failure?.routingKeysExhausted?'Both TypeSafe routing accounts and the document AI fallback are unavailable. ':'Jev routing and the document AI fallback are unavailable. ';
+    const combined=Error(message+error.message);combined.code=error.code||failure?.code||'AI_TRANSIENT';combined.routingKeysExhausted=!!failure?.routingKeysExhausted;throw combined;
+   }
    return {...fallback,routingProvider:'jev',routingFallback:{from:'jev',reason:failure?'provider_failure':'uncertain_decision',errorCode:failure?.code||null,category:routed?.category||null,confidence:routed?.confidence??null,comparisonIntent:routed?.comparisonIntent??null},reason:'Jev required a fallback. '+fallback.reason};
   },
   async extract(doc,images){

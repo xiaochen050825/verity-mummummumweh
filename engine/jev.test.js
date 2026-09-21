@@ -38,6 +38,11 @@ test('both unavailable TypeSafe accounts are reported before the independent Gem
  const result=await p.classify(email);
  assert.equal(result.provider,'api');assert.equal(result.routingFallback.reason,'provider_failure');assert.equal(result.routingFallback.errorCode,'AI_TRANSIENT');assert.equal(geminiCalls,1);
 });
+test('the user-facing failure names every unavailable routing layer',async()=>{
+ const redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};
+ const p=makeProvider(redundant,async()=>new Response('',{status:503}));
+ await assert.rejects(()=>p.classify(email),/Both TypeSafe routing accounts and the document AI fallback are unavailable/);
+});
 test('fallback cannot clear Gemini review or conceal failure of both services',async()=>{
  const p=makeProvider(env,async url=>url.includes('typesafe')?answer('SI_REQUEST',.5,.1):gemini(true));
  assert.equal((await p.classify(email)).needsReview,true);
