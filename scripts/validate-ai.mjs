@@ -44,6 +44,9 @@ async function worker(){while(index<records.length){
  };
  const docs=(email.attachments||[]).map(id=>{
   const d=structuredClone(readers.get(id));if(!d)throw Error('Missing reader snapshot '+id);
+  // Frozen reader snapshots predate the current server-side OCR policy. Remove
+  // legacy browser OCR text so scanned pages are freshly read by GLM OCR.
+  for(const page of d.pages||[])if(page.method==='ocr'&&!page.ocrEngine){page.text='';delete page.blocks;delete page.confidence;}
   const path=resolve(work,'bundle',id);if(!path.startsWith(resolve(work,'bundle')+'\\'))throw Error('Attachment outside input directory');
   const sha256=digest(path);if(d.sha256&&sha256!==d.sha256)throw Error('Original source hash changed');return {...d,sha256};
  });
