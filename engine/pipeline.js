@@ -8,7 +8,7 @@ export async function runPipeline(original,documents,env={},options={}){
  c.pipeline={status:'classifying',provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
-  const classification=c.classification&&(options.keepCategory||c.classification.provider===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
+  const classification=c.classification&&(options.keepCategory||(c.classification.routingProvider||c.classification.provider)===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
  c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
  if(c.classificationPending){stage('review');return c}

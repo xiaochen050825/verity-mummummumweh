@@ -41,7 +41,7 @@ test('Jev routes email only, with low confidence or weak comparison intent sent 
  const env={TYPESAFE_API_KEY:'test'};assert.deepEqual(providerStatus(env),{mode:'local-rules',model:null,visionModel:null,ocrModel:null,routing:'jev',extraction:'local-rules'});
  const calls=[],fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body)});return Response.json({answers:{category:{choice:'BL_COMPARISON',confidence:0.93},compare_intent:{noul:0.92}}})};
  const p=makeProvider(env,fetcher),email={subject:'Please check our draft BL',body:'Attached SI and BL. Please compare them.'};
- const routed=await p.classify(email);assert.equal(routed.category,'BL_COMPARISON');assert.equal(routed.needsReview,false);assert.equal(routed.provider,'jev');assert.equal(calls[0].url,'https://api.typesafe.ai/v1/systemone');assert.equal(calls[0].body.model,'jev-latest');
+ const routed=await p.classify(email);assert.equal(routed.category,'BL_COMPARISON');assert.equal(routed.needsReview,false);assert.equal(routed.provider,'jev');assert.equal(calls[0].url,'https://api.typesafe.ai/v1/systemone');assert.equal(calls[0].body.model,'jev-1.13.0');
  const low=makeProvider(env,async()=>Response.json({answers:{category:{choice:'BL_COMPARISON',confidence:0.93},compare_intent:{noul:0.3}}}));assert.equal((await low.classify(email)).needsReview,true);
 });
 test('low-confidence scanned page uses Grafilab OCR once and keeps the browser transcript',async()=>{
