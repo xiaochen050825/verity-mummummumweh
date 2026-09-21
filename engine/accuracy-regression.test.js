@@ -29,7 +29,9 @@ test('complete company tokens match across table separators without trusting mod
  b.fields.shipper.entity={name:'FRESH ENTITY LTD',qualifier:'TAX ID 12345',address:'42 EXAMPLE ROAD'};
  let f=compareDocuments(a,b).shipper;assert.equal(f.comparison,'MATCH');assert.equal(f.scope_warning,null);
  const different=source('FRESH ENTITY LTD ON BEHALF OF ANOTHER LTD 42 EXAMPLE ROAD TAX ID 12345');
- assert.equal(compareDocuments(a,different).shipper.comparison,'MISMATCH');
+ // An unstated principal is incomplete evidence, not a contradictory principal.
+ const relationship=compareDocuments(a,different).shipper;
+ assert.equal(relationship.comparison,null);assert.equal(relationship.reason,'representation_not_stated');
  const unknown={sha256:'unseen-source-hash',name:'brand-new.xlsx',numberProfile:'unset'};
  assert.equal(applySourceProfile(unknown).numberProfile,'unset');
  assert.equal(normalizeField('gross_weight_kg','21,577 KG',applySourceProfile(unknown).numberProfile).ok,false);
@@ -77,4 +79,28 @@ test('documented weight profile detects a real difference and retains missing we
  assert.equal(compareDocuments(a,b,{si:'en_comma',bl:'en_comma'}).gross_weight_kg.comparison,'MISMATCH');
  const missing=source('N/A','Gross weight','gross_weight_kg');
  assert.equal(compareDocuments(a,missing,{si:'en_comma',bl:'en_comma'}).gross_weight_kg.kind,'MISSING');
+});
+test('unstated represented party is unresolved, while contradictory named parties remain different',()=>{
+ const plain=source('FUTURE PAPER LTD'),represented=source('FUTURE PAPER LTD ON BEHALF OF NORTH STAR LTD');
+ for(const [a,b] of [[plain,represented],[represented,plain]]){
+  const f=compareDocuments(a,b).shipper;
+  assert.equal(f.comparison,null);assert.equal(f.reason,'representation_not_stated');assert.equal(f.kind,'AMBIGUOUS');assert.equal(f.issues[0].reason,'representation_not_stated');
+ }
+ const other=source('FUTURE PAPER LTD ON BEHALF OF SOUTH STAR LTD');
+ assert.equal(compareDocuments(represented,other).shipper.comparison,'MISMATCH');
+ assert.equal(compareDocuments(source('DIFFERENT PAPER LTD'),represented).shipper.comparison,'MISMATCH');
+ assert.equal(compareDocuments(represented,structuredClone(represented)).shipper.comparison,'MATCH');
+ const c=source('FUTURE PAPER LTD ON BEHALF OF NORTH STAR LTD','Notify party','notify_party');
+ const d=source('FUTURE PAPER LTD','Notify party','notify_party');
+ assert.equal(compareDocuments(c,d).notify_party.comparison,null);
+});
+test('document brevity does not authorize dropping an unstated represented party',()=>{
+ for(const short of [true,false])for(const reverse of [true,false]){
+  const a=source('NEW SUPPLIER LTD'+(short?'':' | 42 MARKET ROAD'));
+  const b=source('NEW SUPPLIER LTD ON BEHALF OF NEW PRINCIPAL LTD | 42 MARKET ROAD');
+  a.fields.shipper.entity={name:'NEW SUPPLIER LTD',address:short?'':'42 MARKET ROAD'};
+  b.fields.shipper.entity={name:'NEW SUPPLIER LTD',qualifier:'ON BEHALF OF NEW PRINCIPAL LTD',address:'42 MARKET ROAD'};
+  const f=compareDocuments(...(reverse?[b,a]:[a,b])).shipper;
+  assert.equal(f.comparison,null);assert.equal(f.reason,'representation_not_stated');
+ }
 });

@@ -3,11 +3,11 @@ import {makeProvider,recoverNativeExtraction,ROUTE_VERSION} from './provider.js'
 import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='general-source-2026-09-21-2';
+export const PIPELINE_VERSION='source-review-2026-09-21-5';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
- c.version=(c.version||0)+1;c.fields=blankFields();c.docIssue=null;c.docIssueDetail=null;c.processingError=null;c.processingDetail=null;c.pairIssue=false;c.pair=null;c.pairNote=null;c.pairEvidence=null;c.deferred=false;
+ c.version=(c.version||0)+1;c.fields=blankFields();c.docIssue=null;c.docIssueDetail=null;c.processingError=null;c.processingDetail=null;c.pairIssue=false;c.pair=null;c.pairConfirmation=null;c.pairNote=null;c.pairEvidence=null;c.deferred=false;
  c.pipeline={status:'classifying',engineVersion:PIPELINE_VERSION,provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
@@ -27,7 +27,7 @@ export async function runPipeline(original,documents,env={},options={}){
    if(doc.readError){extracted.push({...doc,side:null,fields:{},type:'UNREADABLE'});continue}
    const providerKey=provider.status.extraction+'/'+(provider.status.model||'parser')+'/'+(provider.status.ocrModel||'browser-ocr')+'/extract-3';
    const cached=original.docs?.find(d=>d.id===doc.id&&d.sha256===doc.sha256&&d.fields&&d.providerKey===providerKey);
-   const reading=cached?{...doc,pages:cached.pages}:structuredClone(doc);
+   const reading=cached?{...doc,pages:doc.pages.some(p=>p.blocks?.some(b=>b.cells?.some(c=>c.type==='number')))?doc.pages:cached.pages}:structuredClone(doc);
    if(!cached&&provider.status.ocrModel&&options.getPageImage)for(const page of reading.pages){
     if(page.method!=='ocr'||(page.confidence??100)>=85&&page.text.trim().length>=80)continue;
     const image=await options.getPageImage(reading,page);if(!image)continue;
@@ -39,7 +39,18 @@ export async function runPipeline(original,documents,env={},options={}){
    extracted.push({...reading,...result,pages:reading.pages,booking,side:result.type==='SI'?'si':result.type==='BL'?'bl':null,numberProfile:doc.numberProfile||'unset',profileEvidence:doc.profileEvidence,profileSource:doc.profileSource,providerKey});c.docs=[...extracted];
   }
   c.docs=extracted;stage('pairing');const si=extracted.filter(d=>d.side==='si'),bl=extracted.filter(d=>d.side==='bl');
-  let a,b;if(options.pair){a=si.find(d=>d.id===options.pair.si);b=bl.find(d=>d.id===options.pair.bl);if(!a||!b)throw Error('Choose one SI and one BL.');if(a.booking&&b.booking&&a.booking!==b.booking)throw Error('The chosen files have different booking references.');if((!a.booking||!b.booking)&&!options.pair.note?.trim())throw Error('Missing booking references need a pairing reason.')}
+  const previous=original.pairConfirmation;
+  const unchangedConfirmation=previous&&previous.siHash&&previous.blHash&&si.some(d=>d.id===previous.si&&d.sha256===previous.siHash)&&bl.some(d=>d.id===previous.bl&&d.sha256===previous.blHash);
+  const requestedPair=options.pair||(unchangedConfirmation?previous:null);
+  let a,b;if(requestedPair){
+   a=si.find(d=>d.id===requestedPair.si);b=bl.find(d=>d.id===requestedPair.bl);
+   if(!a||!b)throw Error('Choose one SI and one BL.');
+   if(a.booking&&b.booking&&a.booking!==b.booking)throw Error('The chosen files have different booking references.');
+   if(!requestedPair.note?.trim()||requestedPair.note.trim().length<8)throw Error('Record the evidence supporting this document pair.');
+   c.pairConfirmation={si:a.id,bl:b.id,siHash:a.sha256,blHash:b.sha256,note:requestedPair.note,confirmedAt:unchangedConfirmation&&!options.pair?previous.confirmedAt:now};
+   c.pairEvidence={ok:true,method:'human_confirmation',note:requestedPair.note};
+   event(c,'Document pair confirmed',requestedPair.note);
+  }
   else if(si.length===1&&bl.length===1){
    c.pairEvidence=automaticPairEvidence(si[0],bl[0]);
    if(c.pairEvidence.ok){[a,b]=[si[0],bl[0]];c.pairNote='Paired using source '+c.pairEvidence.matches.map(m=>m.kind+': '+m.value).join('; ');event(c,'Documents paired',c.pairNote)}

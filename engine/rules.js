@@ -1,6 +1,7 @@
-import {sourceWeightUnit} from './source-profile.js';
+import {sourceWeightUnit,sourceNumericCell} from './source-profile.js';
+import {parseNumber,invariantNumericComparison} from './numbers.js';
 export const KEYS=['shipper','consignee','notify_party','port_of_loading','port_of_discharge','container_count','gross_weight_kg'];
-export const RULE_VERSION='verity-rules-1.4';
+export const RULE_VERSION='verity-rules-1.6';
 export const PORT_VERSION='ports-curated-2';
 // Bounded comparison dictionary; code identities checked against UNECE 2025-1.
 // Source names and declared codes are checked separately. See docs/port-reference.md.
@@ -85,23 +86,15 @@ function normalizePort(raw){
  // A slash list stays a list; never silently choose the final location.
  return {...good(p.named?.length>1?'locations:'+p.named.join('/')+';code:'+(p.codes[0]||''):p.codes[0]||p.named[0]),port:p};
 }
-export function number(raw,profile='unset',factor='1'){
- let s=norm(raw);if(!s)return fail('MISSING','missing_value');
- const patterns={unset:/^[+-]?\d+$/,en_comma:/^[+-]?(?:\d+|[1-9]\d{0,2}(?:,\d{3})+)(?:\.\d+)?$/};
- if(!patterns[profile]?.test(s))return fail('AMBIGUOUS','separator_ambiguous');
- if(profile==='en_comma')s=s.replaceAll(',','');if(profile==='de_dot')s=s.replaceAll('.','').replace(',','.');
- const [whole,fraction='']=s.replace(/^\+/,'').split('.');let digits=BigInt(whole+fraction)*BigInt(factor),scale=fraction.length;
- while(scale&&digits%10n===0n){digits/=10n;scale--}let text=digits.toString().padStart(scale+1,'0');if(scale)text=text.slice(0,-scale)+'.'+text.slice(-scale);
- if(digits<0n)return {...fail('AMBIGUOUS','negative_weight'),parsed:text};return good(text);
-}
+export const number=parseNumber;
 function wordNumber(raw){const units=['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'],tens=['TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'],w=raw.toUpperCase().split(/[- ]/);if(w.length===1&&units.includes(w[0]))return String(units.indexOf(w[0]));const t=tens.indexOf(w[0]),u=units.indexOf(w[1]);if(t>=0&&(w.length===1||w.length===2&&u>0&&u<10))return String((t+2)*10+(w.length===2?u:0));return null}
 export function normalizeField(key,raw,profile='unset'){
  const s=norm(raw);if(!s||/^(?:N\/?A|NONE|NOT PROVIDED|MISSING|-|TBA|TBD|_{2,}(?:\s*(?:KG|KGS|MT))?)$/i.test(s))return fail('MISSING','missing_value');
  if(key==='gross_weight_kg'){
-  const m=s.match(/^([+-]?\d[\d.,]*|[A-Z]+(?:[- ][A-Z]+)?)\s*(KG|KGS|KILOGRAMS?|MT|M\/T|METRIC TONS?|METRIC TONNES?|TONNES?)$/i);
+  const m=s.match(/^([+-]?\d[\d.,'’ \u00a0\u202f]*|[A-Z]+(?:[- ][A-Z]+)?)\s*(KG|KGS|KILOGRAMS?|MT|M\/T|METRIC TONS?|METRIC TONNES?|TONNES?)$/i);
   if(!m)return /^[+-]?[\d.,]+$/.test(s)?fail('MISSING','unit_absent'):fail('AMBIGUOUS','weight_unit_or_value');
   const token=/^[A-Z]/i.test(m[1])?wordNumber(m[1]):m[1];if(token===null)return fail('AMBIGUOUS','unsupported_number_words');
-  return number(token,profile,/^(KG|KGS|KILOGRAM)/i.test(m[2])?'1':'1000');
+  return number(token.trim(),profile,/^(KG|KGS|KILOGRAM)/i.test(m[2])?'1':'1000');
  }
  if(key==='container_count'){
   if(/^\d+$/.test(s)){const n=number(s);return n.ok&&n.value!=='0'?good(n.value):fail('AMBIGUOUS','invalid_container_count')}
@@ -145,6 +138,9 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
   const unitSI=key==='gross_weight_kg'&&av.ok?sourceWeightUnit(si,a):null,unitBL=key==='gross_weight_kg'&&bv.ok?sourceWeightUnit(bl,b):null;
   if(unitSI)x=normalizeField(key,a.raw+' '+unitSI.unit,profiles.si);
   if(unitBL)y=normalizeField(key,b.raw+' '+unitBL.unit,profiles.bl);
+  const numericSI=key==='gross_weight_kg'&&av.ok?sourceNumericCell(si,a):null,numericBL=key==='gross_weight_kg'&&bv.ok?sourceNumericCell(bl,b):null;
+  if(numericSI)x=normalizeField(key,numericSI.value+' '+(unitSI?.unit||numericSI.unit||''),'en_comma');
+  if(numericBL)y=normalizeField(key,numericBL.value+' '+(unitBL?.unit||numericBL.unit||''),'en_comma');
   // A literal cross-reference may only resolve to a validated consignee in the same document.
   const reference=(doc,f,profile)=>{if(key==='notify_party'&&/^SAME AS CONSIGNEE$/i.test(norm(f?.raw))){const c=doc.fields.consignee;return validateEvidence(c,doc).ok?normalizeField('consignee',c.raw,profile):fail('AMBIGUOUS','entity_identity')}return null};
   if(av.ok)x=reference(si,a,profiles.si)||x;if(bv.ok)y=reference(bl,b,profiles.bl)||y;
@@ -152,8 +148,17 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
   // Cross-references must first resolve within each document, never by raw equality.
   const sameEntitySource=entityField&&av.ok&&bv.ok&&x.ok&&y.ok&&entityName(a.raw)===entityName(b.raw)&&!/^SAME AS CONSIGNEE$/i.test(norm(a.raw));
   if(sameEntitySource){x=good(entityName(a.raw));y=good(entityName(b.raw))}
+  // Absence of a represented party is not a contradictory represented party.
+  // Only this explicit source phrase is split; legal suffixes/names are intact.
+  let representationIncomplete=false;
+  if(entityField&&av.ok&&bv.ok&&x.ok&&y.ok&&!sameEntitySource){
+   const parts=f=>entityRaw(f).split(/\s+ON BEHALF OF\b/);
+   const ap=parts(a),bp=parts(b);
+   if(ap.length<=2&&bp.length<=2&&ap[0]===bp[0]&&ap[0]&&(ap.length===2)!==(bp.length===2))representationIncomplete=true;
+  }
   const bad=!x.ok?x:!y.ok?y:null;
   let comparison=bad?null:x.value===y.value?'MATCH':'MISMATCH',reason=bad?.reason||null,kind=bad?.kind||null;
+  if(representationIncomplete){comparison=null;reason='representation_not_stated';kind='AMBIGUOUS'}
   // A code/name inconsistency inside a source must not hide a demonstrable
   // difference between two named locations, or manufacture a difference when
   // the complete, independently validated source expressions are identical.
@@ -164,11 +169,18 @@ export function compareDocuments(si,bl,profiles={si:'unset',bl:'unset'}){
    else if(x.port.codes.length===1&&y.port.codes.length===1&&x.port.codes[0]!==y.port.codes[0]){comparison='MISMATCH';portDecision='different_declared_codes'}
    if(portDecision){reason=null;kind=null}
   }
+  let numericDecision=null;
+  if(key==='gross_weight_kg'&&av.ok&&bv.ok){
+   numericDecision=invariantNumericComparison(x,y);
+   if(numericDecision){comparison=numericDecision;reason=null;kind=null}
+  }
   const scopeWarning=!sameEntitySource&&entityField&&a?.entity?.address&&b?.entity?.address&&entityName(a.entity.address)!==entityName(b.entity.address)?'address_conflict':null;
   const qa=[{rule:'source_evidence',version:RULE_VERSION,status:av.ok&&bv.ok?'pass':'flag'},{rule:'field_grammar',status:bad?'flag':'pass'},{rule:'detail_totals',status:'not_applicable',reason:'No verified complete detail-total relationship provided.'},{rule:'business_range',status:'not_applicable',reason:'No sourced business range is configured.'}];
   if(portDecision)qa.push({rule:'port_source_comparison',status:'pass',reason:portDecision,sourceWarning:bad?.reason||null});
+  if(representationIncomplete)qa.push({rule:'represented_party_completeness',status:'flag',reason:'One source names a represented party; the other does not. Identity agreement is not assumed.'});
+  if(key==='gross_weight_kg')qa.push({rule:'numeric_interpretations',status:numericDecision?'pass':'flag',decision:numericDecision,si:x.candidates||[],bl:y.candidates||[],sourceSI:numericSI,sourceBL:numericBL,comparisonPolicy:'exact_decimal_no_rounding_tolerance'});
   if(unitSI||unitBL)qa.push({rule:'source_unit',status:'pass',si:unitSI,bl:unitBL});
-  return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,source_warnings:portDecision&&bad?[bad.reason]:[],issues:bad&&!portDecision?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
+  return [key,{si:a?.raw??'Not located',bl:b?.raw??'Not located',sourceSI:a?.raw??'Not located',sourceBL:b?.raw??'Not located',normalizedSI:x.ok?x.value:null,normalizedBL:y.ok?y.value:null,comparison,reason,kind,scope:entityField?'name_and_qualifier':'field_value',scope_warning:scopeWarning,affectedSide:!x.ok?'si':!y.ok?'bl':null,verified:false,numeric_candidates:key==='gross_weight_kg'?{si:x.candidates||[],bl:y.candidates||[]}:undefined,raw_equal:norm(a?.raw)===norm(b?.raw),quality_checks:qa,source_warnings:portDecision&&bad?[bad.reason]:[],issues:(bad&&!portDecision&&!numericDecision||representationIncomplete)?[{kind,reason,stage:'validate',retryable:false,next_action:kind==='MISSING'?'add_source':'review_evidence'}]:[],evidence:{si:a?{fileId:si.id,page:a.page,quote:a.quote,readMethod:a.readMethod||si.pages.find(p=>p.page===a.page)?.method}:null,bl:b?{fileId:bl.id,page:b.page,quote:b.quote,readMethod:b.readMethod||bl.pages.find(p=>p.page===b.page)?.method}:null}}];
  }));
 }
 export const blankFields=()=>Object.fromEntries(KEYS.map(k=>[k,{si:'Not extracted',bl:'Not extracted',comparison:null,reason:'comparison_paused',kind:'UNREADABLE'}]));

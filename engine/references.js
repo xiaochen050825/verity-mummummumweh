@@ -3,7 +3,7 @@ import {norm} from './rules.js';
 // Reference types are kept separate: an order number is not a booking number.
 export function sourceReferences(doc){
  const refs={booking:[],order:[],bl:[]};
- const patterns={booking:/\bBOOKING(?:[ \t]+(?:REFERENCE|REF\.?|NUMBER|NO\.?))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,order:/\bORDER[ \t]+(?:NUMBER|NO\.?)[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,bl:/\bB\/?L[ \t]+(?:NUMBER|NO\.?)(?:[ \t]*\([^)]*\))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi};
+ const patterns={booking:/\bBOOKING(?:[ \t]+(?:REFERENCE|REF\.?|NUMBER|NO\.?))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,order:/\bORDER[ \t]+(?:NUMBER|NO\.?)[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi,bl:/(?:\b(?:B\/?L|BILL[ \t]+OF[ \t]+LADING)[ \t]+(?:NUMBER|NO\.?)|提单号|提單號)(?:[ \t]*\([^)]*\))?[ \t]*(?:[:#：][ \t]*|[ \t]+)([A-Z0-9][A-Z0-9-]{3,})/gi};
  for(const page of doc.pages||[]){
   // Low-quality OCR cannot establish automatic identity.
   if(page.method==='ocr'&&!page.ocrEngine&&(page.confidence??0)<80)continue;

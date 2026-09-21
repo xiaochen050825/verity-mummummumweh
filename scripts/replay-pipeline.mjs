@@ -2,13 +2,17 @@
 // validation, comparison and export. Network calls are prohibited.
 import {readFileSync,readdirSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {runPipeline} from '../engine/pipeline.js';
 import {competitionOutput} from '../engine/export.js';
 const [inputArg,outputArg]=process.argv.slice(2),input=resolve(inputArg),output=resolve(outputArg);
 if(input===output)throw Error('Cannot overwrite baseline');
 mkdirSync(output);mkdirSync(join(output,'cases'));
-const cases=[],changes=[],skipped=[];
+const cases=[],changes=[],skipped=[],inputCaseHashes={};
+const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const sourceCodeHashes=Object.fromEntries(readdirSync(resolve('engine')).filter(f=>f.endsWith('.js')&&!f.endsWith('.test.js')).map(f=>['engine/'+f,hash(readFileSync(resolve('engine',f)))]));
 for(const file of readdirSync(join(input,'cases')).filter(f=>f.endsWith('.json')).sort()){
+ inputCaseHashes[file]=hash(readFileSync(join(input,'cases',file)));
  const before=JSON.parse(readFileSync(join(input,'cases',file),'utf8'));
  let c=before;
  // Failed or incomplete model responses require a real provider retry. Never
@@ -25,5 +29,5 @@ for(const file of readdirSync(join(input,'cases')).filter(f=>f.endsWith('.json')
 const exported=competitionOutput(cases);
 writeFileSync(join(output,'export-check.json'),JSON.stringify(exported,null,2));
 writeFileSync(join(output,exported.ready?'submission.json':'submission-partial-NOT-FOR-SUBMISSION.json'),JSON.stringify(exported.output,null,2));
-writeFileSync(join(output,'replay-metadata.json'),JSON.stringify({emails:cases.length,apiCalls:0,skippedFailedOrUncached:skipped,changes},null,2));
+writeFileSync(join(output,'replay-metadata.json'),JSON.stringify({emails:cases.length,apiCalls:0,skippedFailedOrUncached:skipped,sourceCodeHashes,inputCaseHashes,changes},null,2));
 console.log(JSON.stringify({emails:cases.length,automatic:cases.filter(c=>c.pipeline?.status==='complete').length,manual:cases.filter(c=>c.pipeline?.status!=='complete').length,exported:Object.keys(exported.output).length,blocked:exported.blocked.length,skipped,apiCalls:0}));
