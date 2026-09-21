@@ -25,7 +25,8 @@ const started=performance.now();save();
 async function worker(){while(index<records.length){
  const email=records[index++],at=performance.now();
  const previous=prior.get(email.email_id);
- if(previous&&!previous.processingError){cases.push(previous);writeFileSync(join(out,'cases',email.email_id+'.json'),JSON.stringify(previous));metadata.preserved.push(email.email_id);metadata.processed++;save();continue}
+ const retryPrevious=previous&&(previous.processingError||previous.classificationPending);
+ if(previous&&!retryPrevious){cases.push(previous);writeFileSync(join(out,'cases',email.email_id+'.json'),JSON.stringify(previous));metadata.preserved.push(email.email_id);metadata.processed++;save();continue}
  if(previous)metadata.retried.push(email.email_id);
  const fetcher=async(url,options)=>{
   const isJev=url==='https://api.typesafe.ai/v1/systemone';if(!isJev&&url!=='https://llm.grafilab.ai/v1/chat/completions')throw Error('Unexpected provider endpoint');
@@ -52,7 +53,12 @@ async function worker(){while(index<records.length){
   if(/\.pdf$/i.test(d.name)&&!d.readerEvidence)d.readerEvidence={format:'pdf',nativeTextChecked:true,pages:(d.pages||[]).map(p=>({page:p.page,nativeTextChars:p.method==='native'?p.text.replace(/\s/g,'').length:0,rasterImages:p.method==='ocr'?1:0})),reader:'frozen-source-inspection',sha256};
   return {...d,sha256};
  });
- const result=await runPipeline(previous||{id:email.email_id,emailId:email.email_id,subject:email.subject,body:email.body,attachments:email.attachments||[],history:[],fields:{},docs:[],version:1},docs,env,{fetcher,getPageImage:async(doc,page)=>{
+ // A pending classification is the result we explicitly want to retry. Remove
+ // only that cached decision so runPipeline must ask the routing provider
+ // again; keep the rest of the case as an audit trail and preserve all other
+ // cases byte-for-byte during a resumed run.
+ const seed=previous?.classificationPending?{...previous,classification:null,classificationPending:false}:previous||{id:email.email_id,emailId:email.email_id,subject:email.subject,body:email.body,attachments:email.attachments||[],history:[],fields:{},docs:[],version:1};
+ const result=await runPipeline(seed,docs,env,{fetcher,getPageImage:async(doc,page)=>{
   if(!/\.pdf$/i.test(doc.name))return null;
   const prefix=join(out,'images',basename(doc.name,'.pdf')+'-'+page.page),png=prefix+'.png';
   if(!existsSync(png))execFileSync('C:/Users/User/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/poppler/Library/bin/pdftoppm.EXE',['-f',String(page.page),'-l',String(page.page),'-singlefile','-scale-to','1800','-png',resolve(work,'bundle',doc.id),prefix],{stdio:'pipe',timeout:30000});
