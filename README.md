@@ -8,6 +8,10 @@ Verity reads operational emails, identifies which messages require a Shipping In
 
 **Live prototype:** [verity-mummummumweh-workspace.xiaochen050825.chatgpt.site](https://verity-mummummumweh-workspace.xiaochen050825.chatgpt.site/)
 
+**60-second product walkthrough:** [Watch the demo](docs/demo/verity-product-walkthrough.mp4)
+
+**Technical documentation:** [Architecture, processing logic and validation](docs/TECHNICAL_DOCUMENTATION.md)
+
 ## Why it exists
 
 Finding a difference is only half the job. A container-count mismatch, a missing gross weight, an unreadable scan and multiple document versions require different responses. Verity keeps the issue, source evidence and next action together so reviewers do not have to search across emails and attachments or guess what to do next.
