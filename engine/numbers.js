@@ -43,3 +43,13 @@ export function invariantNumericComparison(a,b,identicalSource=false){
  const outcomes=new Set(a.candidates.flatMap(x=>b.candidates.map(y=>x.value===y.value?'MATCH':'MISMATCH')));
  return outcomes.size===1?[...outcomes][0]:null;
 }
+
+// A plain integer and its canonical comma-grouped spelling state the same
+// integer when the source explicitly gives the same unit on both sides.
+// This does not infer a locale for arbitrary decimal values.
+export function groupedIntegerAgreement(a,b){
+ const plain=s=>/^\+?\d+$/.test(s),grouped=s=>/^\+?[1-9]\d{0,2}(?:,\d{3})+$/.test(s);
+ const x=String(a??'').normalize('NFKC').trim(),y=String(b??'').normalize('NFKC').trim();
+ return plain(x)&&grouped(y)&&x.replace(/^\+/,'')===y.replace(/^\+/,'').replaceAll(',','')
+  || plain(y)&&grouped(x)&&y.replace(/^\+/,'')===x.replace(/^\+/,'').replaceAll(',','');
+}

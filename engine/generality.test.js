@@ -4,6 +4,7 @@ import {automaticPairEvidence} from './references.js';
 import {normalizeField,compareDocuments} from './rules.js';
 import {Input,bindSource} from '../server/input.js';
 import {imageOnlyPDF} from './export.js';
+import {groupedIntegerAgreement} from './numbers.js';
 
 test('conflicting attachment context vetoes automatic pairing',()=>{
  const si={id:'a',side:'si',pages:[{page:1,method:'native',text:'Booking No.: FRESH7182'}]},bl={id:'b',side:'bl',pages:[{page:1,method:'native',text:'BL No.: SHIP3392'}]};
@@ -35,4 +36,14 @@ test('PDF evidence survives actual input contract and source binding',()=>{
  assert.throws(()=>bindSource({...input,pages:[]},meta));
  assert.throws(()=>Input.parse({...input,readerEvidence:{...input.readerEvidence,pages:[{page:1,nativeTextChars:-1,rasterImages:1}]}}));
  assert.equal(bindSource({...input,readerEvidence:undefined},meta).readerEvidence,undefined);
+});
+
+test('same-unit integer and canonical comma grouping agree without case-specific values',()=>{
+ for(const [plain,grouped] of [['116055','116,055'],['1234','1,234'],['987654321','987,654,321']]){
+  assert.equal(groupedIntegerAgreement(plain,grouped),true);
+  assert.equal(groupedIntegerAgreement(grouped,plain),true);
+  const doc=raw=>({id:raw,pages:[{page:1,text:'Gross Weight (KG): '+raw,method:'native'}],fields:{gross_weight_kg:{raw,quote:'Gross Weight (KG): '+raw,page:1,status:'OK'}}});
+  assert.equal(compareDocuments(doc(plain),doc(grouped)).gross_weight_kg.comparison,'MATCH');
+ }
+ for(const [a,b] of [['116055','116,05'],['116055','116.055'],['1234','01,234'],['1234','1,235']])assert.equal(groupedIntegerAgreement(a,b),false);
 });
