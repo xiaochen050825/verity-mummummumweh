@@ -48,10 +48,11 @@ export default {async fetch(req,env){
   if(url.pathname==='/api/batches'&&req.method==='POST'){
    const input=await body(req);if(!Array.isArray(input.rows)||!input.rows.length||input.rows.length>1000)throw Error('Import 1–1000 messages per batch.');
    if(!Array.isArray(input.files)||input.files.length>1500)throw Error('Import at most 1500 extracted attachments.');
-   const metas=[];for(const f of input.files)metas.push(JSON.parse((await fileMeta(env,owner,f.id)).data));
+   const stored=await env.DB.prepare('SELECT id,data FROM files WHERE owner=?').bind(owner).all(),byId=new Map(stored.results.map(f=>[f.id,f.data])),metas=[];
+   for(const f of input.files){const data=byId.get(f.id);if(!data)throw Error('Source file not found.');metas.push(JSON.parse(data))}
    const id='batch-'+crypto.randomUUID(),rows=importEmails(input.rows,id),batch={id,name:'Import '+new Date().toLocaleDateString('en-GB'),count:rows.length,demo:false,server:true,created:new Date().toISOString(),files:metas};
    const statements=[env.DB.prepare('INSERT INTO batches(id,owner,data,created) VALUES(?,?,?,?)').bind(id,owner,JSON.stringify(batch),batch.created)];
-   const records=rows.map(c=>({...c,server:true,revision:1}));for(const c of records)statements.push(env.DB.prepare('INSERT INTO cases(id,owner,batch_id,data,revision) VALUES(?,?,?,?,1)').bind(c.id,owner,id,JSON.stringify(c)));
+   const records=rows.map(c=>({...c,server:true,revision:1}));for(let i=0;i<records.length;i+=20){const chunk=records.slice(i,i+20),values=chunk.map(()=>'(?,?,?,?,1)').join(','),bindings=chunk.flatMap(c=>[c.id,owner,id,JSON.stringify(c)]);statements.push(env.DB.prepare('INSERT INTO cases(id,owner,batch_id,data,revision) VALUES '+values).bind(...bindings))}
    await env.DB.batch(statements);return reply({batch,cases:records},201);
   }
   const match=url.pathname.match(/^\/api\/cases\/([^/]+)\/(process|actions)$/);
