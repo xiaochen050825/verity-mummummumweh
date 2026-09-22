@@ -12,7 +12,7 @@ import {api,uploadFile,cloudFile,saveAction,routeCase,processCase} from './api.j
 import {readDocument,releaseReader,unpack} from './reader.js';
 import {emailRowsInArchive,emailRowsFromJson} from './import-bundle.js';
 import {matchingFiles,planImportBatches,runBoundedQueue} from './batch-queue.js';
-import {runStreamQueue,createDocumentPool,canResume} from './stream-queue.js';
+import {runStreamQueue,createDocumentPool,createStartGate,canResume} from './stream-queue.js';
 import {LiveCasePanel,LiveResolution,LiveNumberFormat} from './live.jsx';
 import './base.css';
 import './experience.css';
@@ -23,7 +23,7 @@ const PROGRESS_STEPS=['Prepare','Upload','Create records','Read & compare','Comp
 // browser, Cloudflare worker, or upstream AI services. Provider calls already
 // retry transient 408/429/5xx responses with bounded exponential backoff.
 const limitedDevice=(navigator.deviceMemory&&navigator.deviceMemory<=4)||(navigator.hardwareConcurrency||4)<=4;
-const ROUTE_CONCURRENCY=limitedDevice?12:32,PROCESS_CONCURRENCY=limitedDevice?6:16,UPLOAD_CONCURRENCY=limitedDevice?10:24;
+const ROUTE_CONCURRENCY=limitedDevice?10:24,PROCESS_CONCURRENCY=limitedDevice?4:8,UPLOAD_CONCURRENCY=limitedDevice?10:24;
 const READ_CONCURRENCY=limitedDevice?2:6;
 function ProgressDock({progress,onPause,onClose}){if(!progress)return null;const index={preparing:0,uploading:1,creating:2,processing:3,paused:3,complete:4,failed:3}[progress.phase]??0,pct=progress.total?Math.round(progress.current/progress.total*100):0;return <motion.aside className={`processing-dock ${progress.phase==='failed'?'failed':''}`} role={progress.phase==='failed'?'alert':'status'} initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:12}}><div className="processing-dock-head"><div><span className="eyebrow">LIVE PROCESSING</span><strong>{progress.title}</strong></div>{['complete','failed','paused'].includes(progress.phase)&&<button className="icon-btn" aria-label="Close processing status" onClick={onClose}><X size={16}/></button>}</div><p>{progress.detail}</p>{progress.total>0&&<><div className="processing-meter" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.current}><motion.span animate={{width:pct+'%'}}/></div><small>{progress.current.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%</small></>}<ol className="processing-steps">{PROGRESS_STEPS.map((label,i)=><li key={label} className={i<index?'done':i===index?'active':''}><span>{i<index?<Check size={12}/>:i+1}</span><b>{label}</b></li>)}</ol>{progress.phase==='processing'&&<Button className="quiet" onClick={onPause}><Pause size={15}/>Pause after active items</Button>}</motion.aside>}
 function App(){
@@ -48,12 +48,13 @@ function App(){
  async function processRecords(records,batches,localFiles=new Map()){
   if(queueControl.current.running)return;
   queueControl.current={running:true,paused:false};setStaging(true);
-  const started=performance.now(),read=createDocumentPool(f=>readDocument(f,undefined,localFiles.get(f.id)),{concurrency:READ_CONCURRENCY});
+  const started=performance.now(),read=createDocumentPool(f=>readDocument(f,undefined,localFiles.get(f.id)),{concurrency:READ_CONCURRENCY}),routeStart=createStartGate(limitedDevice?80:40),processStart=createStartGate(limitedDevice?200:125);
   try{
    const result=await runStreamQueue(records,{
-    route:async record=>{if(record.classification)return record;const updated=await routeCase(record);replaceCase(updated);return updated},
+    route:async record=>{if(record.classification)return record;await routeStart();const updated=await routeCase(record);replaceCase(updated);return updated},
     needsProcess:record=>!!record.classification&&!record.classificationPending&&record.category==='BL_COMPARISON'&&!record.classificationOnly,
     process:async record=>{
+     await processStart();
      const files=batches.find(b=>b.id===record.batchId)?.files||[];
      const docs=await Promise.all(matchingFiles([record],files).map(read));
      replaceCase(await processCase(record,docs));

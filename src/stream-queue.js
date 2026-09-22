@@ -36,4 +36,13 @@ export function createDocumentPool(read,{concurrency=4,cacheSize=32}={}){
  };
 }
 
+export function createStartGate(intervalMs,{now=()=>performance.now(),sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))}={}){
+ if(!Number.isFinite(intervalMs)||intervalMs<0||intervalMs>10000)throw Error('Invalid start interval');
+ let next=0,tail=Promise.resolve();
+ return ()=>{
+  const turn=tail.then(async()=>{const current=now(),wait=Math.max(0,next-current);next=Math.max(next,current)+intervalMs;if(wait)await sleep(wait)});
+  tail=turn.catch(()=>{});return turn;
+ };
+}
+
 export const canResume=c=>!!c.server&&(!c.pipeline||['classifying','routed','processing','extracting','pairing','validating','comparing','recovering'].includes(c.pipeline.status)||!!(c.processingError&&/Invalid redirect value/i.test(c.processingDetail||'')));

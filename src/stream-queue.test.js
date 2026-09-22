@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {runStreamQueue,createDocumentPool,canResume} from './stream-queue.js';
+import {runStreamQueue,createDocumentPool,createStartGate,canResume} from './stream-queue.js';
 const gate=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}};
 test('a ready comparison starts while another email is still being classified',async()=>{
  const slowRoute=gate(),firstCheck=gate();
@@ -35,4 +35,8 @@ test('saved unfinished stages can resume, completed and human review cases canno
  for(const status of ['routed','processing','extracting','validating'])assert.equal(canResume({server:true,pipeline:{status}}),true);
  for(const status of ['complete','review'])assert.equal(canResume({server:true,pipeline:{status}}),false);
  assert.equal(canResume({server:false}),false);
+});
+test('start gate spaces bursts without waiting for earlier work to finish',async()=>{
+ let time=0;const waits=[],gate=createStartGate(40,{now:()=>time,sleep:async ms=>{waits.push(ms);time+=ms}});
+ await Promise.all([gate(),gate(),gate(),gate()]);assert.deepEqual(waits,[40,40,40]);assert.equal(time,120);
 });
