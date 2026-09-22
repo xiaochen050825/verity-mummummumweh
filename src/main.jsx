@@ -18,6 +18,10 @@ import './experience.css';
 import './react.css';
 const readRoute=()=>{const [page,...parts]=(location.hash.slice(1)||'inbox').split('/');return {page,id:decodeURIComponent(parts.join('/'))}};
 const PROGRESS_STEPS=['Prepare','Upload','Create records','Read & compare','Complete'];
+// Keep enough parallel work to hide provider latency without flooding the
+// browser, Cloudflare worker, or upstream AI services. Provider calls already
+// retry transient 408/429/5xx responses with bounded exponential backoff.
+const PROCESS_CONCURRENCY=10,UPLOAD_CONCURRENCY=12;
 function ProgressDock({progress,onPause,onClose}){if(!progress)return null;const index={preparing:0,uploading:1,creating:2,processing:3,paused:3,complete:4,failed:3}[progress.phase]??0,pct=progress.total?Math.round(progress.current/progress.total*100):0;return <motion.aside className={`processing-dock ${progress.phase==='failed'?'failed':''}`} role={progress.phase==='failed'?'alert':'status'} initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:12}}><div className="processing-dock-head"><div><span className="eyebrow">LIVE PROCESSING</span><strong>{progress.title}</strong></div>{['complete','failed','paused'].includes(progress.phase)&&<button className="icon-btn" aria-label="Close processing status" onClick={onClose}><X size={16}/></button>}</div><p>{progress.detail}</p>{progress.total>0&&<><div className="processing-meter" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.current}><motion.span animate={{width:pct+'%'}}/></div><small>{progress.current.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%</small></>}<ol className="processing-steps">{PROGRESS_STEPS.map((label,i)=><li key={label} className={i<index?'done':i===index?'active':''}><span>{i<index?<Check size={12}/>:i+1}</span><b>{label}</b></li>)}</ol>{progress.phase==='processing'&&<Button className="quiet" onClick={onPause}><Pause size={15}/>Pause after active items</Button>}</motion.aside>}
 function App(){
  const [state,setState]=useState(loadState),[route,setRoute]=useState(readRoute),[modal,setModal]=useState(null),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[issueFilter,setIssueFilter]=useState('all'),[pageNum,setPageNum]=useState(1),[sort,setSort]=useState('action'),[field,setField]=useState('gross_weight_kg'),[staged,setStaged]=useState([]),[importError,setImportError]=useState(''),[staging,setStaging]=useState(false),[batchFilter,setBatchFilter]=useState('all');
@@ -50,7 +54,7 @@ function App(){
      docs.push(await cache.get(f.id));if(cache.size>32)cache.delete(cache.keys().next().value);
     }
     replaceCase(await processCase(record,docs));
-   },{concurrency:6,shouldStop:()=>queueControl.current.paused,onProgress:({finished,total,errors})=>setLiveProgress({phase:'processing',title:'Reading and comparing documents',detail:errors?`${errors} need retry · finished results are already saved`:'Classifying, reading, extracting and checking seven fields',current:finished,total})});
+   },{concurrency:PROCESS_CONCURRENCY,shouldStop:()=>queueControl.current.paused,onProgress:({finished,total,errors})=>setLiveProgress({phase:'processing',title:'Reading and comparing documents',detail:errors?`${errors} need retry · finished results are already saved`:`Up to ${PROCESS_CONCURRENCY} checks run in parallel with automatic retry`,current:finished,total})});
    if(result.errors.length)toast.error(`${result.errors.length} requests failed. Saved results are retained.`);
    else toast.success(result.remaining?'Paused. Saved emails can be continued.':'Processing finished. Review the flagged cases.');
    setLiveProgress(result.errors.length?{phase:'failed',title:'Batch finished with retry needed',detail:`${result.finished-result.errors.length} saved · ${result.errors.length} need retry`,current:result.finished,total:records.length}:result.remaining?{phase:'paused',title:'Processing paused',detail:`${result.finished} finished · ${result.remaining} waiting`,current:result.finished,total:records.length}:{phase:'complete',title:'Batch processing complete',detail:'Finished results are saved. Open the review queue for flagged cases.',current:records.length,total:records.length});
@@ -62,7 +66,7 @@ function App(){
   try{
    setLiveProgress({phase:'preparing',title:'Preparing your files',detail:'Opening the archive and checking supported files…',current:0,total:0});
    const expanded=await unpack(staged);setLiveProgress({phase:'uploading',title:'Uploading originals',detail:'Uploading several files at the same time',current:0,total:expanded.length});
-   const uploaded=await runBoundedQueue(expanded,uploadFile,{concurrency:8,onProgress:({finished,total,errors})=>setLiveProgress({phase:'uploading',title:'Uploading originals',detail:errors?`${errors} uploads failed`:'Eight uploads can run in parallel',current:finished,total})});
+   const uploaded=await runBoundedQueue(expanded,uploadFile,{concurrency:UPLOAD_CONCURRENCY,onProgress:({finished,total,errors})=>setLiveProgress({phase:'uploading',title:'Uploading originals',detail:errors?`${errors} uploads failed`:`Up to ${UPLOAD_CONCURRENCY} uploads run in parallel`,current:finished,total})});
    if(uploaded.errors.length)throw Error(`${uploaded.errors.length} files could not be uploaded. Try the batch again.`);const files=uploaded.values.filter(Boolean);
    let rows=staged.flatMap(f=>f.rows||[]);
    if(!rows.length&&files.length)rows=[{id:'direct-upload-'+crypto.randomUUID(),subject:'Direct document verification',body:'The user uploaded source documents directly. Identify Shipping Instructions and Draft Bills of Lading, then compare each unambiguous pair.',attachments:files.map(f=>f.name)}];
