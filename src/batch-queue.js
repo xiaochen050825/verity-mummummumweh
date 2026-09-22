@@ -10,8 +10,8 @@ export function planImportBatches(rows,files){
 }
 export async function runBoundedQueue(records,handle,{concurrency=3,shouldStop=()=>false,onProgress=()=>{}}={}){
  if(!Number.isInteger(concurrency)||concurrency<1||concurrency>16)throw Error('Invalid queue concurrency');
- let next=0,finished=0;const errors=[];
- async function worker(){while(!shouldStop()&&next<records.length){const item=records[next++];try{await handle(item)}catch(error){errors.push({id:item.id,error:error.message})}finished++;onProgress({finished,total:records.length,errors:errors.length})}}
+ let next=0,finished=0;const errors=[],values=[];
+ async function worker(){while(!shouldStop()&&next<records.length){const index=next++,item=records[index];try{values[index]=await handle(item,index)}catch(error){errors.push({id:item.id||item.name||String(index),error:error.message})}finished++;onProgress({finished,total:records.length,errors:errors.length})}}
  await Promise.all(Array.from({length:Math.min(concurrency,records.length)},worker));
- return {finished,total:records.length,remaining:records.length-next,errors};
+ return {finished,total:records.length,remaining:records.length-next,errors,values};
 }

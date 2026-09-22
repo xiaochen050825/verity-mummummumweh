@@ -12,6 +12,11 @@ test('pause drains active work and leaves unstarted records resumable',async()=>
  assert.equal(first.remaining,19);await runBoundedQueue(records.filter(r=>!seen.includes(r.id)),async r=>seen.push(r.id));
  assert.equal(new Set(seen).size,20);assert.equal(seen.length,20);
 });
+test('concurrent queue returns values in source order',async()=>{
+ const records=[{id:'first',delay:12},{id:'second',delay:0},{id:'third',delay:4}];
+ const result=await runBoundedQueue(records,async item=>{await new Promise(resolve=>setTimeout(resolve,item.delay));return item.id.toUpperCase()},{concurrency:3});
+ assert.deepEqual(result.values,['FIRST','SECOND','THIRD']);
+});
 test('large imports split without dropping emails or mixing attachment references',()=>{
  const rows=Array.from({length:10000},(_,i)=>({id:'new-'+i,subject:'New mail',body:'New text',attachments:i===10?['x/source.pdf']:[]}));
  const chunks=planImportBatches(rows,[{id:'source',name:'x/source.pdf'},{id:'unrelated',name:'unrelated.pdf'}]);

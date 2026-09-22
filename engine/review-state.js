@@ -3,9 +3,9 @@ export function reviewState(c){
  const fields=Object.values(c.fields||{}),differences=fields.filter(f=>f.comparison==='MISMATCH').length;
  const unresolved=fields.filter(f=>f.comparison==null||f.scope_warning).length;
  const base={differences,unresolved,comparisonComplete:fields.length===7&&unresolved===0&&!c.docIssue&&!c.pairIssue&&!c.processingError};
- if(c.processing||['processing','classifying','extracting','pairing','validating','comparing'].includes(c.pipeline?.status))return {...base,key:'processing',label:'Processing',owner:'system'};
+ if(c.processing||!c.pipeline&&!c.demo&&c.classificationPending||['processing','classifying','extracting','pairing','validating','comparing'].includes(c.pipeline?.status))return {...base,key:'processing',label:'Processing',owner:'system'};
  if(c.processingError)return {...base,key:'system_failure',label:'System recovery needed',owner:'system'};
- if(c.classificationPending||!c.pipeline&&!c.demo)return {...base,key:'input_needed',label:'Classification needed',owner:'reviewer'};
+ if(c.classificationPending)return {...base,key:'input_needed',label:'Classification needed',owner:'reviewer'};
  if(c.category!=='BL_COMPARISON'||c.classificationOnly)return {...base,key:'classification_only',label:'Classification complete',owner:null,comparisonComplete:false};
  if(differences){
   const awaiting=fields.some(f=>f.comparison==='MISMATCH'&&!f.verified);
