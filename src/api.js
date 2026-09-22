@@ -4,4 +4,5 @@ export async function api(path,options={}){const response=await fetch('/api'+pat
 export async function uploadFile(file){const form=new FormData();form.append('file',file);return api('/files',{method:'POST',body:form})}
 export async function cloudFile(file){const response=await fetch('/api/files/'+encodeURIComponent(file.id),{headers:{'X-Verity-Workspace':browserWorkspace()}});if(!response.ok)throw Error('The stored original could not be loaded.');return new File([await response.blob()],file.name,{type:file.type})}
 export const saveAction=(c,action,payload)=>api('/cases/'+encodeURIComponent(c.id)+'/actions',{method:'POST',body:JSON.stringify({revision:c.revision,action,payload})});
+export const routeCase=c=>api('/cases/'+encodeURIComponent(c.id)+'/route',{method:'POST',body:JSON.stringify({revision:c.revision})});
 export const processCase=(c,documents,extra={})=>api('/cases/'+encodeURIComponent(c.id)+'/process',{method:'POST',body:JSON.stringify({revision:c.revision,documents,...extra})});

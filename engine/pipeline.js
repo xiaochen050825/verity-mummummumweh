@@ -12,10 +12,15 @@ export async function runPipeline(original,documents,env={},options={}){
  c.pipeline={status:'classifying',engineVersion:PIPELINE_VERSION,provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
-  const classification=c.classification&&(options.keepCategory||c.classification.promptVersion===ROUTE_VERSION&&(c.classification.routingProvider||c.classification.provider)===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
+ const classification=c.classification&&(options.keepCategory||c.classification.promptVersion===ROUTE_VERSION&&(c.classification.routingProvider||c.classification.provider)===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
  c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
  if(c.classificationPending){stage('review');return c}
+ if(options.routeOnly){
+  if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete')}
+  else stage('routed');
+  return c;
+ }
   // A request to send a draft BL has no comparison evidence yet. The request can
   // be classified as handled without ever claiming that seven fields matched.
   const current=(c.subject+'\n'+(c.body||'').split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0]);

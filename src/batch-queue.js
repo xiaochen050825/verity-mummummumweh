@@ -9,7 +9,7 @@ export function planImportBatches(rows,files){
  };if(rows.length)split(rows);return chunks;
 }
 export async function runBoundedQueue(records,handle,{concurrency=3,shouldStop=()=>false,onProgress=()=>{}}={}){
- if(!Number.isInteger(concurrency)||concurrency<1||concurrency>16)throw Error('Invalid queue concurrency');
+ if(!Number.isInteger(concurrency)||concurrency<1||concurrency>32)throw Error('Invalid queue concurrency');
  let next=0,finished=0;const errors=[],values=[];
  async function worker(){while(!shouldStop()&&next<records.length){const index=next++,item=records[index];try{values[index]=await handle(item,index)}catch(error){errors.push({id:item.id||item.name||String(index),error:error.message})}finished++;onProgress({finished,total:records.length,errors:errors.length})}}
  await Promise.all(Array.from({length:Math.min(concurrency,records.length)},worker));

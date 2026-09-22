@@ -55,13 +55,16 @@ export default {async fetch(req,env){
    const records=rows.map(c=>({...c,server:true,revision:1}));for(let i=0;i<records.length;i+=20){const chunk=records.slice(i,i+20),values=chunk.map(()=>'(?,?,?,?,1)').join(','),bindings=chunk.flatMap(c=>[c.id,owner,id,JSON.stringify(c)]);statements.push(env.DB.prepare('INSERT INTO cases(id,owner,batch_id,data,revision) VALUES '+values).bind(...bindings))}
    await env.DB.batch(statements);return reply({batch,cases:records},201);
   }
-  const match=url.pathname.match(/^\/api\/cases\/([^/]+)\/(process|actions)$/);
+  const match=url.pathname.match(/^\/api\/cases\/([^/]+)\/(process|route|actions)$/);
   if(match&&req.method==='POST'){
    const id=decodeURIComponent(match[1]),input=await body(req),c=await getCase(env,owner,id);
    if(input.revision!==c.revision)return reply({error:'This case changed. Refresh before trying again.'},409);
    if(match[2]==='actions'){
     if(input.action==='support'){const f=await fileMeta(env,owner,input.payload?.file?.id);input.payload.file=JSON.parse(f.data)}
     const out=reviewAction(c,input.action,input.payload);return reply(await saveCase(env,owner,out,c.revision));
+   }
+   if(match[2]==='route'){
+    const out=await runPipeline(c,[],env,{routeOnly:true});return reply(await saveCase(env,owner,out,c.revision));
    }
    if(!Array.isArray(input.documents)||input.documents.length>12)throw Error('Choose at most 12 document candidates.');
    const docs=[];for(const raw of input.documents){const d=Input.parse(raw);const f=await fileMeta(env,owner,d.id);for(const p of d.pages)if(p.imageId)await fileMeta(env,owner,p.imageId);docs.push(applySourceProfile({...bindSource(d,f),numberProfile:d.numberProfile||'unset'}))}

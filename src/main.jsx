@@ -8,7 +8,7 @@ import {Toaster,toast} from 'sonner';
 import {Button,Fold,Segments,Modal,Empty,SaveFooter,ErrorBoundary} from './components.jsx';
 import {FIELD_KEYS,LABELS,CATEGORIES,ISSUE,initialState,initialCases,loadState,mode,pending,issue,finding,nextAction,caseRoute,countFields,sourceValue,sourceText,documents,updateCase,buildReport,csvReport,download,importEmails} from './model.js';
 import {putFile,getFile} from './storage.js';
-import {api,uploadFile,cloudFile,saveAction,processCase} from './api.js';
+import {api,uploadFile,cloudFile,saveAction,routeCase,processCase} from './api.js';
 import {readDocument,releaseReader,unpack} from './reader.js';
 import {emailRowsInArchive,emailRowsFromJson} from './import-bundle.js';
 import {matchingFiles,planImportBatches,runBoundedQueue} from './batch-queue.js';
@@ -21,7 +21,7 @@ const PROGRESS_STEPS=['Prepare','Upload','Create records','Read & compare','Comp
 // Keep enough parallel work to hide provider latency without flooding the
 // browser, Cloudflare worker, or upstream AI services. Provider calls already
 // retry transient 408/429/5xx responses with bounded exponential backoff.
-const PROCESS_CONCURRENCY=10,UPLOAD_CONCURRENCY=12;
+const ROUTE_CONCURRENCY=20,PROCESS_CONCURRENCY=12,UPLOAD_CONCURRENCY=16;
 function ProgressDock({progress,onPause,onClose}){if(!progress)return null;const index={preparing:0,uploading:1,creating:2,processing:3,paused:3,complete:4,failed:3}[progress.phase]??0,pct=progress.total?Math.round(progress.current/progress.total*100):0;return <motion.aside className={`processing-dock ${progress.phase==='failed'?'failed':''}`} role={progress.phase==='failed'?'alert':'status'} initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:12}}><div className="processing-dock-head"><div><span className="eyebrow">LIVE PROCESSING</span><strong>{progress.title}</strong></div>{['complete','failed','paused'].includes(progress.phase)&&<button className="icon-btn" aria-label="Close processing status" onClick={onClose}><X size={16}/></button>}</div><p>{progress.detail}</p>{progress.total>0&&<><div className="processing-meter" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.current}><motion.span animate={{width:pct+'%'}}/></div><small>{progress.current.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%</small></>}<ol className="processing-steps">{PROGRESS_STEPS.map((label,i)=><li key={label} className={i<index?'done':i===index?'active':''}><span>{i<index?<Check size={12}/>:i+1}</span><b>{label}</b></li>)}</ol>{progress.phase==='processing'&&<Button className="quiet" onClick={onPause}><Pause size={15}/>Pause after active items</Button>}</motion.aside>}
 function App(){
  const [state,setState]=useState(loadState),[route,setRoute]=useState(readRoute),[modal,setModal]=useState(null),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[issueFilter,setIssueFilter]=useState('all'),[pageNum,setPageNum]=useState(1),[sort,setSort]=useState('action'),[field,setField]=useState('gross_weight_kg'),[staged,setStaged]=useState([]),[importError,setImportError]=useState(''),[staging,setStaging]=useState(false),[batchFilter,setBatchFilter]=useState('all');
@@ -44,10 +44,20 @@ function App(){
  async function stage(files){setStaging(true);setImportError('');try{const added=[];for(const file of Array.from(files)){const type=file.name.split('.').pop().toLowerCase(),limit=type==='zip'?512*1024*1024:25*1024*1024;if(file.size>limit)throw Error(`${file.name} is larger than ${type==='zip'?'512 MB':'25 MB'}.`);const item={id:crypto.randomUUID(),file,name:file.name,size:file.size,type};if(item.type==='json'){item.rows=emailRowsFromJson(JSON.parse(await file.text()),file.name);item.info=`${item.rows.length} email record${item.rows.length===1?'':'s'}`}else if(item.type==='zip'){const JSZip=(await import('jszip')).default;const zip=await JSZip.loadAsync(file);const names=Object.keys(zip.files).filter(n=>!zip.files[n].dir);if(names.length>1500)throw Error('This ZIP contains too many files. Split the batch.');item.rows=await emailRowsInArchive(file);item.info=item.rows.length?`${item.rows.length} emails · ${names.length-item.rows.length} other entries`:`${names.length} archive entries`;item.entries=names}else if(!['pdf','png','jpg','jpeg','tif','tiff','txt','docx','xlsx'].includes(item.type))throw Error(`Unsupported file: ${file.name}`);added.push(item)}setStaged(old=>[...old,...added.filter(f=>!old.some(x=>x.name===f.name&&x.size===f.size))]);toast.success(`${added.length} file${added.length===1?'':'s'} checked.`)}catch(e){setImportError(e.message)}finally{setStaging(false)}}
  async function processRecords(records,batches){
   if(queueControl.current.running)return;
-  queueControl.current={running:true,paused:false};setStaging(true);setLiveProgress({phase:'processing',title:'Reading and comparing documents',detail:'Starting the processing queue…',current:0,total:records.length});
+  queueControl.current={running:true,paused:false};setStaging(true);
   const cache=new Map();let readerTail=Promise.resolve();
   try{
-   const result=await runBoundedQueue(records,async record=>{
+   let routed=records,routeErrors=[];
+   const waitingForRoute=records.filter(record=>!record.classification);
+   if(waitingForRoute.length){
+    setLiveProgress({phase:'processing',title:'Routing emails',detail:`Up to ${ROUTE_CONCURRENCY} emails are classified in parallel`,current:0,total:waitingForRoute.length});
+    const routeResult=await runBoundedQueue(waitingForRoute,async record=>{const updated=await routeCase(record);replaceCase(updated);return updated},{concurrency:ROUTE_CONCURRENCY,shouldStop:()=>queueControl.current.paused,onProgress:({finished,total,errors})=>setLiveProgress({phase:'processing',title:'Routing emails',detail:errors?`${errors} need retry · successful routes are already saved`:`Up to ${ROUTE_CONCURRENCY} emails are classified in parallel`,current:finished,total})});
+    const updates=new Map(routeResult.values.filter(Boolean).map(record=>[record.id,record]));routed=records.map(record=>updates.get(record.id)||record);routeErrors=routeResult.errors;
+    if(routeResult.remaining||queueControl.current.paused){setLiveProgress({phase:'paused',title:'Processing paused',detail:`${routeResult.finished} routed · ${routeResult.remaining} waiting`,current:routeResult.finished,total:waitingForRoute.length});return}
+   }
+   const comparisons=routed.filter(record=>record.classification&&!record.classificationPending&&record.category==='BL_COMPARISON');
+   setLiveProgress({phase:'processing',title:'Reading and comparing documents',detail:comparisons.length?`Only ${comparisons.length} routed checks need document processing`:'No document comparisons are required',current:0,total:comparisons.length});
+   const result=await runBoundedQueue(comparisons,async record=>{
     const files=batches.find(b=>b.id===record.batchId)?.files||[],docs=[];
     for(const f of matchingFiles([record],files)){
      if(!cache.has(f.id)){const task=readerTail.then(()=>readDocument(f));readerTail=task.catch(()=>{});cache.set(f.id,task)}
@@ -55,9 +65,10 @@ function App(){
     }
     replaceCase(await processCase(record,docs));
    },{concurrency:PROCESS_CONCURRENCY,shouldStop:()=>queueControl.current.paused,onProgress:({finished,total,errors})=>setLiveProgress({phase:'processing',title:'Reading and comparing documents',detail:errors?`${errors} need retry · finished results are already saved`:`Up to ${PROCESS_CONCURRENCY} checks run in parallel with automatic retry`,current:finished,total})});
-   if(result.errors.length)toast.error(`${result.errors.length} requests failed. Saved results are retained.`);
+   const allErrors=[...routeErrors,...result.errors];
+   if(allErrors.length)toast.error(`${allErrors.length} requests failed. Saved results are retained.`);
    else toast.success(result.remaining?'Paused. Saved emails can be continued.':'Processing finished. Review the flagged cases.');
-   setLiveProgress(result.errors.length?{phase:'failed',title:'Batch finished with retry needed',detail:`${result.finished-result.errors.length} saved · ${result.errors.length} need retry`,current:result.finished,total:records.length}:result.remaining?{phase:'paused',title:'Processing paused',detail:`${result.finished} finished · ${result.remaining} waiting`,current:result.finished,total:records.length}:{phase:'complete',title:'Batch processing complete',detail:'Finished results are saved. Open the review queue for flagged cases.',current:records.length,total:records.length});
+   setLiveProgress(allErrors.length?{phase:'failed',title:'Batch finished with retry needed',detail:`${records.length-allErrors.length} saved · ${allErrors.length} need retry`,current:records.length,total:records.length}:result.remaining?{phase:'paused',title:'Processing paused',detail:`${result.finished} comparisons finished · ${result.remaining} waiting`,current:result.finished,total:comparisons.length}:{phase:'complete',title:'Batch processing complete',detail:'Finished results are saved. Open the review queue for flagged cases.',current:records.length,total:records.length});
    const latest=await api('/workspace');setState(s=>({...s,cases:[...s.cases.filter(c=>!c.server),...latest.cases],batches:[...s.batches.filter(b=>!b.server),...latest.batches]}));
   }catch(e){toast.error(e.message);setLiveProgress({phase:'failed',title:'Processing stopped',detail:e.message,current:0,total:records.length})}finally{await releaseReader();queueControl.current.running=false;setStaging(false)}
  }
