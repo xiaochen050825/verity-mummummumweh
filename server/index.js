@@ -26,6 +26,12 @@ export default {async fetch(req,env){
   if(url.pathname==='/api/workspace'&&req.method==='GET'){
    const [b,c]=await Promise.all([env.DB.prepare('SELECT data FROM batches WHERE owner=? ORDER BY created DESC').bind(owner).all(),env.DB.prepare('SELECT data,revision FROM cases WHERE owner=?').bind(owner).all()]);return reply({batches:b.results.map(x=>JSON.parse(x.data)),cases:c.results.map(x=>({...JSON.parse(x.data),revision:x.revision,server:true}))});
   }
+  if(url.pathname==='/api/workspace'&&req.method==='DELETE'){
+   const stored=await env.DB.prepare('SELECT id FROM files WHERE owner=?').bind(owner).all(),keys=stored.results.map(x=>owner+'/'+x.id);
+   for(let i=0;i<keys.length;i+=1000)await env.BUCKET.delete(keys.slice(i,i+1000));
+   await env.DB.batch([env.DB.prepare('DELETE FROM cases WHERE owner=?').bind(owner),env.DB.prepare('DELETE FROM batches WHERE owner=?').bind(owner),env.DB.prepare('DELETE FROM files WHERE owner=?').bind(owner)]);
+   return reply({cleared:true,cases:0,batches:0,files:0});
+  }
   if(url.pathname==='/api/files'&&req.method==='POST'){
    if(Number(req.headers.get('content-length')||0)>27_000_000)return reply({error:'File limit is 25 MB.'},413);
    const form=await req.formData(),file=form.get('file');if(!file||typeof file.arrayBuffer!=='function'||file.size>25*1024*1024)throw Error('Choose a file up to 25 MB.');
