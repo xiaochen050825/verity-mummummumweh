@@ -15,8 +15,8 @@ async function office(file,kind){const {default:JSZip}=await import('jszip');con
  else {const shared=await read('xl/sharedStrings.xml'),strings=shared?[...shared.getElementsByTagName('si')].map(x=>x.textContent):[];const sheets=Object.keys(zip.files).filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort();if(sheets.length>30)throw Error('Use a workbook with at most 30 sheets.');for(const path of sheets){const d=await read(path),blocks=[];for(const row of d.getElementsByTagName('row')){const cells=[...row.getElementsByTagName('c')].map(c=>spreadsheetCell(c,strings));blocks.push({text:cells.map(c=>c.text).join('\t'),cells})}pages.push({page:pages.length+1,text:blocks.map(b=>b.text).join('\n'),blocks,method:'native'})}}
  return pages;
 }
-export async function readDocument(meta,onProgress){
- const file=await cloudFile(meta),head=new Uint8Array(await file.slice(0,8).arrayBuffer()),ext=file.name.split('.').pop().toLowerCase();let pages=[],readerEvidence;
+export async function readDocument(meta,onProgress,localFile){
+ const file=localFile||await cloudFile(meta),head=new Uint8Array(await file.slice(0,8).arrayBuffer()),ext=file.name.split('.').pop().toLowerCase();let pages=[],readerEvidence;
  try{
   if(ext==='pdf'&&file.size===0)throw Error('The PDF file is empty, i.e. its size is zero bytes.');
   if(String.fromCharCode(...head.slice(0,4))==='%PDF'){

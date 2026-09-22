@@ -4,7 +4,7 @@ import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
 import {contextReadReason} from './review-evidence.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='glm-primary-2026-09-22-13';
+export const PIPELINE_VERSION='glm-primary-2026-09-22-14';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
@@ -16,16 +16,16 @@ export async function runPipeline(original,documents,env={},options={}){
  c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
  if(c.classificationPending){stage('review');return c}
- if(options.routeOnly){
-  if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete')}
-  else stage('routed');
-  return c;
- }
   // A request to send a draft BL has no comparison evidence yet. The request can
   // be classified as handled without ever claiming that seven fields matched.
   const current=(c.subject+'\n'+(c.body||'').split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0]);
   c.classificationOnly=c.category==='BL_COMPARISON'&&!documents.length&&!(c.attachments||[]).length&&/\b(?:assist\s+to\s+)?(?:send|provide|share|forward)\s+(?:us\s+)?(?:the\s+)?(?:draft\s+)?(?:b\/?l|bill of lading)\b/i.test(current)&&!/\b(?:compare|verify|check)\b/i.test(current);
   if(c.classificationOnly){c.fields={};stage('complete');event(c,'Request classified','Draft BL requested; no SI/BL comparison was performed.');return c}
+ if(options.routeOnly){
+  if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete')}
+  else stage('routed');
+  return c;
+ }
   if(c.category!=='BL_COMPARISON'){c.fields={};stage('complete');return c}
   stage('extracting');const extracted=[];let contextReads=0;
   const preflight=documents.filter(d=>!d.readError).map(d=>({...d,...localExtract(d)}));
