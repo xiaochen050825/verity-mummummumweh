@@ -4,7 +4,7 @@ import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
 import {contextReadReason} from './review-evidence.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='glm-primary-2026-09-22-14';
+export const PIPELINE_VERSION='dual-jev-stream-2026-09-22-15';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
@@ -12,7 +12,7 @@ export async function runPipeline(original,documents,env={},options={}){
  c.pipeline={status:'classifying',engineVersion:PIPELINE_VERSION,provider:provider.status.mode,model:provider.status.model,routing:provider.status.routing,extraction:provider.status.extraction,rules:RULE_VERSION,ports:PORT_VERSION,startedAt:now,stages:[],rereads:0};
  const stage=s=>{c.pipeline.status=s;c.pipeline.stages.push({stage:s,at:new Date().toISOString()})};
  try{
- const classification=c.classification&&(options.keepCategory||c.classification.promptVersion===ROUTE_VERSION&&(c.classification.routingProvider||c.classification.provider)===provider.status.routing)?c.classification:await provider.classify({subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
+ const classification=c.classification&&(options.keepCategory||c.classification.promptVersion===ROUTE_VERSION&&(c.classification.routingProvider||c.classification.provider)===provider.status.routing)?c.classification:await provider.classify({id:c.id,emailId:c.emailId,subject:c.subject||'',body:c.body||'',attachments:c.attachments||[]});
  c.classification=classification;c.category=classification.category;c.classificationPending=classification.needsReview;
  event(c,'Email routed',classification.reason+' ['+classification.provider+']');
  if(c.classificationPending){stage('review');return c}

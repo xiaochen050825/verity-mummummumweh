@@ -6,7 +6,7 @@ export const CATEGORIES=['BL_COMPARISON','SI_REQUEST','INVOICE_QUERY','GENERAL',
 const Field=z.object({raw:z.string().max(4000).nullable(),quote:z.string().max(6000),page:z.number().int().positive(),status:z.enum(['OK','MISSING','AMBIGUOUS']),entity:z.object({name:z.string(),qualifier:z.string(),address:z.string()}).optional()}).strict();
 const Extraction=z.object({type:z.enum(['SI','BL','OTHER','AMBIGUOUS']),booking:z.string().max(200).nullable(),bookingQuote:z.string().max(1000),fields:z.object(Object.fromEntries(KEYS.map(k=>[k,Field]))).strict()}).strict();
 const Classification=z.object({category:z.enum(CATEGORIES),quote:z.string().max(2000),reason:z.string().max(1000),needsReview:z.boolean()}).strict();
-export const ROUTE_VERSION='jev-route-4';
+export const ROUTE_VERSION='jev-route-5';
 const categoryDefinitions={
  BL_COMPARISON:'A shipment-specific request to check, compare, verify, approve or amend a draft Bill of Lading, OR a standalone request to send/provide a draft BL for checking. Exclude emails primarily supplying Shipping Instructions to create a future BL: those are SI_REQUEST even if they ask for a draft once available.',
  SI_REQUEST:'A shipment-specific request to create, prepare, provide or send Shipping Instructions (SI), OR submission of SI details for creation of a future BL. Supplying shipment instructions remains SI_REQUEST when the closing line requests a draft BL once available. Not a standalone draft BL checking request, and not a generic reminder covering all pending shipments.',
@@ -66,7 +66,13 @@ function documentAPI(env){
  return null;
 }
 const jevKeys=env=>[env.TYPESAFE_API_KEY,env.TYPESAFE_BACKUP_API_KEY].filter((key,index,all)=>key&&all.indexOf(key)===index);
-export function providerStatus(env){const api=documentAPI(env),routingKeys=jevKeys(env);return {mode:api?'api':'local-rules',model:api?.model||null,visionModel:api?.visionModel||api?.model||null,ocrModel:env.GRAFILAB_API_KEY?env.GRAFILAB_OCR_MODEL||'grafilab/glm-ocr':null,routing:routingKeys.length?'jev':api?'api':'local-rules',extraction:api?.name||'local-rules'}}
+export function jevShardIndex(email,count){
+ if(!Number.isInteger(count)||count<1)return 0;
+ const source=String(email.id||email.emailId||email.subject+'\n'+email.body+'\n'+(email.attachments||[]).join('|'));let hash=2166136261;
+ for(let i=0;i<source.length;i++)hash=Math.imul(hash^source.charCodeAt(i),16777619);
+ return (hash>>>0)%count;
+}
+export function providerStatus(env){const api=documentAPI(env),routingKeys=jevKeys(env);return {mode:api?'api':'local-rules',model:api?.model||null,visionModel:api?.visionModel||api?.model||null,ocrModel:env.GRAFILAB_API_KEY?env.GRAFILAB_OCR_MODEL||'grafilab/glm-ocr':null,routing:routingKeys.length?'jev':api?'api':'local-rules',routingAccounts:routingKeys.length,extraction:api?.name||'local-rules'}}
 export function makeProvider(env,fetcher=fetch){
  const status=providerStatus(env),api=documentAPI(env),routingKeys=jevKeys(env);
  async function call(schema,instructions,input,image,repair=false){
@@ -94,7 +100,9 @@ export function makeProvider(env,fetcher=fetch){
   const state='Subject: '+email.subject+'\nBody:\n'+email.body.slice(0,12000);
   const body=JSON.stringify({model:env.JEV_MODEL||'jev-1.13.0',state,questions:{category:{type:'choice',instructions:routingInstructions,criteria:categoryDefinitions},compare_intent:{type:'noul',instructions:'The current message requests checking, verification, approval, correction of a specific draft Bill of Lading, or requests a draft BL to be sent for checking. Generic operational lists, mass reminders, mentions and quoted old requests are not enough.'}}});
   const failures=[];
-  for(let index=0;index<routingKeys.length;index++){
+  const start=jevShardIndex(email,routingKeys.length),keyOrder=routingKeys.map((_,offset)=>(start+offset)%routingKeys.length);
+  for(let attempt=0;attempt<keyOrder.length;attempt++){
+   const index=keyOrder[attempt];
    try{
     const res=await fetcher('https://api.typesafe.ai/v1/systemone',{method:'POST',headers:{Authorization:'Bearer '+routingKeys[index],'Content-Type':'application/json'},body,signal:AbortSignal.timeout(15000),redirect:'manual'});
     if(!res.ok){const e=Error('Jev returned HTTP '+res.status);e.code=[408,429,500,502,503,504,529].includes(res.status)?'AI_TRANSIENT':'AI_CONFIGURATION';throw e}
@@ -104,7 +112,7 @@ export function makeProvider(env,fetcher=fetch){
     const line=current.split('\n').map(x=>x.trim()).find(x=>x&&/\b(?:b\/?l|bill of lading|shipping instructions?|invoice|billing)\b/i.test(x))||current.split('\n').map(x=>x.trim()).find(Boolean)||email.subject;
     const quote=line.slice(0,1000),gate=keywordGate(email);
     const needsReview=!complete||confidence<0.8||(category==='BL_COMPARISON'?(!gate||intent<0.8):intent>0.2)||!quote;
-    return {category,quote,quoteSource:'email_excerpt',confidence,comparisonIntent:intent,reason:'Jev routing; confidence '+confidence.toFixed(2)+'; comparison intent '+intent.toFixed(2)+'. Email excerpt is context, not a model-generated explanation.',needsReview,provider:'jev',routingAccount:index?'backup':'primary',routingFailover:index>0,routingAttempts:index+1,gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:email.subject.length+email.body.length,complete},promptVersion:ROUTE_VERSION};
+    return {category,quote,quoteSource:'email_excerpt',confidence,comparisonIntent:intent,reason:'Jev routing; confidence '+confidence.toFixed(2)+'; comparison intent '+intent.toFixed(2)+'. Email excerpt is context, not a model-generated explanation.',needsReview,provider:'jev',routingAccount:index?'backup':'primary',routingShard:index,routingFailover:attempt>0,routingAttempts:attempt+1,gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:email.subject.length+email.body.length,complete},promptVersion:ROUTE_VERSION};
    }catch(error){failures.push(error)}
   }
   const last=failures.at(-1)||Error('No Jev routing key is configured.');

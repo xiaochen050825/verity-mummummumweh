@@ -39,7 +39,7 @@ test('native document labels recover two independent entity differences from an 
  const checked=compareDocuments(a,b);assert.equal(checked.shipper.comparison,'MATCH');assert.equal(checked.consignee.comparison,'MISMATCH');assert.equal(checked.notify_party.comparison,'MISMATCH');assert.equal(a.booking,b.booking);
 });
 test('Jev routes email only, with low confidence or weak comparison intent sent to review',async()=>{
- const env={TYPESAFE_API_KEY:'test'};assert.deepEqual(providerStatus(env),{mode:'local-rules',model:null,visionModel:null,ocrModel:null,routing:'jev',extraction:'local-rules'});
+ const env={TYPESAFE_API_KEY:'test'};assert.deepEqual(providerStatus(env),{mode:'local-rules',model:null,visionModel:null,ocrModel:null,routing:'jev',routingAccounts:1,extraction:'local-rules'});
  const calls=[],fetcher=async(url,opts)=>{calls.push({url,body:JSON.parse(opts.body)});return Response.json({answers:{category:{choice:'BL_COMPARISON',confidence:0.93},compare_intent:{noul:0.92}}})};
  const p=makeProvider(env,fetcher),email={subject:'Please check our draft BL',body:'Attached SI and BL. Please compare them.'};
  const routed=await p.classify(email);assert.equal(routed.category,'BL_COMPARISON');assert.equal(routed.needsReview,false);assert.equal(routed.provider,'jev');assert.equal(calls[0].url,'https://api.typesafe.ai/v1/systemone');assert.equal(calls[0].body.model,'jev-1.13.0');

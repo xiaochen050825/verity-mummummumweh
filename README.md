@@ -116,6 +116,7 @@ Without provider keys, Verity uses a conservative local parser and keeps uncerta
 | `GRAFILAB_VISION_MODEL` | Optional image model override |
 | `GRAFILAB_OCR_MODEL` | Optional OCR model override |
 | `TYPESAFE_API_KEY` | Primary Jev routing key |
+| `TYPESAFE_BACKUP_API_KEY` | Second Jev routing key; receives half the email shards and provides failover |
 | `TYPESAFE_BACKUP_API_KEY` | Backup Jev account key |
 | `JEV_MODEL` | Optional tested Jev model override |
 | `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` | Generic OpenAI-compatible fallback |

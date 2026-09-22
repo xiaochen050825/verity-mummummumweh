@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {makeProvider} from './provider.js';
+import {jevShardIndex,makeProvider} from './provider.js';
 const email={subject:'BL and SI',body:'Please prepare the SI for this shipment.'};
 const env={TYPESAFE_API_KEY:'test',GRAFILAB_API_KEY:'test'};
 const answer=(choice='SI_REQUEST',confidence=.95,noul=.05)=>Response.json({answers:{category:{choice,confidence},compare_intent:{noul}}});
@@ -26,11 +26,17 @@ test('Jev overload and malformed answers recover through Gemini',async()=>{
   assert.equal(result.category,'SI_REQUEST');assert.equal(result.routingFallback.reason,'provider_failure');
  }
 });
-test('backup TypeSafe account is used only when the primary key cannot return a valid decision',async()=>{
+test('the other TypeSafe account takes over when the selected shard cannot return a valid decision',async()=>{
  const redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};const keys=[];
- const p=makeProvider(redundant,async(_url,opts)=>{const key=opts.headers.Authorization;keys.push(key);return key==='Bearer test'?new Response('',{status:429}):answer()});
+ const p=makeProvider(redundant,async(_url,opts)=>{const key=opts.headers.Authorization;keys.push(key);return keys.length===1?new Response('',{status:429}):answer()});
  const result=await p.classify(email);
- assert.equal(result.provider,'jev');assert.equal(result.routingAccount,'backup');assert.equal(result.routingFailover,true);assert.equal(result.routingAttempts,2);assert.deepEqual(keys,['Bearer test','Bearer backup']);
+ assert.equal(result.provider,'jev');assert.equal(result.routingFailover,true);assert.equal(result.routingAttempts,2);assert.equal(new Set(keys).size,2);
+});
+test('two TypeSafe accounts split a 520-email batch evenly before failover',async()=>{
+ const counts=new Map(),redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};
+ await Promise.all(Array.from({length:520},(_,i)=>{const item={...email,id:'email_'+String(i+1).padStart(3,'0')};return makeProvider(redundant,async(_url,opts)=>{const key=opts.headers.Authorization;counts.set(key,(counts.get(key)||0)+1);return answer()}).classify(item)}));
+ const split=[...counts.values()].sort((a,b)=>a-b);assert.equal(split.reduce((a,b)=>a+b,0),520);assert.ok(split[1]-split[0]<=2);
+ assert.notEqual(jevShardIndex({id:'email_001'},2),jevShardIndex({id:'email_002'},2));
 });
 test('both unavailable TypeSafe accounts are reported before the independent Gemini fallback',async()=>{
  const redundant={...env,TYPESAFE_BACKUP_API_KEY:'backup'};let geminiCalls=0;
