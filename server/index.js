@@ -14,8 +14,11 @@ async function saveCase(env,owner,c,expected){const out={...c,revision:expected+
 export default {async fetch(req,env){
  const url=new URL(req.url);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(req);
  try{
-  const owner=req.headers.get('oai-authenticated-user-id')||(env.LOCAL_DEV==='true'&&['127.0.0.1','localhost'].includes(url.hostname)?'local-reviewer':null);
-  if(!owner)return reply({error:'Sign in to access this workspace.'},401);
+  const cookieWorkspace=(req.headers.get('cookie')||'').match(/(?:^|;\\s*)verity_browser_workspace=([0-9a-f-]+)/i)?.[1];
+  const browserWorkspace=req.headers.get('x-verity-workspace')||cookieWorkspace;
+  const anonymousOwner=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(browserWorkspace||'')?'browser:'+browserWorkspace:null;
+  const owner=req.headers.get('oai-authenticated-user-id')||(env.LOCAL_DEV==='true'&&['127.0.0.1','localhost'].includes(url.hostname)?'local-reviewer':anonymousOwner);
+  if(!owner)return reply({error:'Your browser workspace could not be created. Refresh and try again.'},401);
   const origin=req.headers.get('origin'),localPreview=env.LOCAL_DEV==='true'&&['127.0.0.1','localhost'].includes(url.hostname)&&origin==='http://127.0.0.1:5178';
   if(!['GET','HEAD'].includes(req.method)&&!localPreview&&(req.headers.get('sec-fetch-site')==='cross-site'||origin&&origin!==url.origin))return reply({error:'Cross-origin write rejected.'},403);
   if(!env.DB||!env.BUCKET)return reply({error:'Workspace storage is unavailable.'},503);
