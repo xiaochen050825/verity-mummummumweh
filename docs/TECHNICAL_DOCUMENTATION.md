@@ -75,7 +75,7 @@ Jev reads the subject and body and answers two bounded questions in parallel:
 1. Choose one category: `BL_COMPARISON`, `SI_REQUEST`, `INVOICE_QUERY`, `GENERAL` or `SPAM`.
 2. Estimate whether the current message requests a specific BL comparison.
 
-The application accepts a Jev route only when its confidence, comparison-intent result, message coverage and keyword evidence agree. A low-confidence or conflicting route is sent to Gemini for an independent classification using the original email. When two Jev accounts are configured, email IDs are deterministically split 50/50 between them; each request tries the other account only after provider failure or rate limiting. An uncertain judgment is never repeated merely to seek a preferred answer.
+The application accepts a Jev route only when its confidence, comparison-intent result, message coverage and keyword evidence agree. A confident `SI_REQUEST` may legitimately ask for the future draft BL, so that expected workflow wording is not treated as a conflict. A low-confidence or genuinely conflicting route is sent to Gemini for an independent classification using the original email. When two Jev accounts are configured, email IDs are deterministically split 50/50 between them; each request tries the other account only after provider failure or rate limiting. An uncertain judgment is never repeated merely to seek a preferred answer.
 
 Only `BL_COMPARISON` continues to document comparison. Other messages finish as classification-only records.
 

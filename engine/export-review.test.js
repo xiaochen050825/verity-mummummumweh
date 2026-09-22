@@ -35,3 +35,7 @@ test('image-only competition mapping requires measured native text absence, not 
  d.readerEvidence.pages[0].nativeTextChars=0;d.readerEvidence.pages[0].rasterImages=0;assert.equal(imageOnlyPDF(d),false);
  d.readerEvidence.pages[0].rasterImages=1;d.readerEvidence.sha256='different-source';assert.equal(imageOnlyPDF(d),false);
 });
+test('an image-only pair with conflicting OCR booking references still exports as unreadable review',()=>{
+ const c=base();c.pairIssue=true;c.docs=['si','bl'].map(id=>({id,name:id+'.pdf',pages:[{page:1,text:'OCR text',method:'ocr'}],readerEvidence:{format:'pdf',nativeTextChecked:true,pages:[{page:1,nativeTextChars:0,rasterImages:1}]}}));
+ const r=competitionOutput([c]);assert.equal(r.ready,true);assert.equal(r.output[c.id].status,'NEEDS_REVIEW');assert.equal(r.output[c.id].review_reason,'unreadable');
+});

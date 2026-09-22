@@ -6,7 +6,7 @@ export const CATEGORIES=['BL_COMPARISON','SI_REQUEST','INVOICE_QUERY','GENERAL',
 const Field=z.object({raw:z.string().max(4000).nullable(),quote:z.string().max(6000),page:z.number().int().positive(),status:z.enum(['OK','MISSING','AMBIGUOUS']),entity:z.object({name:z.string(),qualifier:z.string(),address:z.string()}).optional()}).strict();
 const Extraction=z.object({type:z.enum(['SI','BL','OTHER','AMBIGUOUS']),booking:z.string().max(200).nullable(),bookingQuote:z.string().max(1000),fields:z.object(Object.fromEntries(KEYS.map(k=>[k,Field]))).strict()}).strict();
 const Classification=z.object({category:z.enum(CATEGORIES),quote:z.string().max(2000),reason:z.string().max(1000),needsReview:z.boolean()}).strict();
-export const ROUTE_VERSION='jev-route-5';
+export const ROUTE_VERSION='jev-route-6';
 const categoryDefinitions={
  BL_COMPARISON:'A shipment-specific request to check, compare, verify, approve or amend a draft Bill of Lading, OR a standalone request to send/provide a draft BL for checking. Exclude emails primarily supplying Shipping Instructions to create a future BL: those are SI_REQUEST even if they ask for a draft once available.',
  SI_REQUEST:'A shipment-specific request to create, prepare, provide or send Shipping Instructions (SI), OR submission of SI details for creation of a future BL. Supplying shipment instructions remains SI_REQUEST when the closing line requests a draft BL once available. Not a standalone draft BL checking request, and not a generic reminder covering all pending shipments.',
@@ -111,7 +111,11 @@ export function makeProvider(env,fetcher=fetch){
     const current=email.body.split(/\n(?:On .+wrote:|[- ]*Original Message[- ]*|From:)/i)[0];
     const line=current.split('\n').map(x=>x.trim()).find(x=>x&&/\b(?:b\/?l|bill of lading|shipping instructions?|invoice|billing)\b/i.test(x))||current.split('\n').map(x=>x.trim()).find(Boolean)||email.subject;
     const quote=line.slice(0,1000),gate=keywordGate(email);
-    const needsReview=!complete||confidence<0.8||(category==='BL_COMPARISON'?(!gate||intent<0.8):intent>0.2)||!quote;
+    // compare_intent is expected to be high for BL checks and may also be high
+    // for SI submissions that ask for a future draft BL. It only contradicts
+    // categories outside the SI/BL workflow.
+    const intentConflict=category==='BL_COMPARISON'?(!gate||intent<0.8):category==='SI_REQUEST'?!gate:intent>0.2;
+    const needsReview=!complete||confidence<0.8||intentConflict||!quote;
     return {category,quote,quoteSource:'email_excerpt',confidence,comparisonIntent:intent,reason:'Jev routing; confidence '+confidence.toFixed(2)+'; comparison intent '+intent.toFixed(2)+'. Email excerpt is context, not a model-generated explanation.',needsReview,provider:'jev',routingAccount:index?'backup':'primary',routingShard:index,routingFailover:attempt>0,routingAttempts:attempt+1,gate,keyword_gate:gate?'hit':'no_hit',body_coverage:{characters:email.subject.length+email.body.length,complete},promptVersion:ROUTE_VERSION};
    }catch(error){failures.push(error)}
   }

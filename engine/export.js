@@ -22,7 +22,8 @@ export function competitionOutput(cases,expectedIds=cases.map(c=>c.emailId||c.id
  if(new Set(ids).size!==ids.length)blocked.push({reason:'Duplicate email IDs across selected batches.'});
  for(const id of expectedIds)if(!ids.includes(id))blocked.push({email_id:id,reason:'Missing email result.'});
  for(const c of cases){const id=c.emailId||c.id,fields=Object.values(c.fields||{}),diff=KEYS.filter(k=>c.fields?.[k]?.comparison==='MISMATCH'),unknown=fields.filter(f=>f.comparison===null);let reason=null;
-  if(c.demo||c.classificationPending||c.processingError||c.pairIssue||c.multiple||!c.pipeline)reason='Example, unclassified, unprocessed, failed, or unpaired case.';
+  const supportedBeforePairing=reviewReasons(c);
+  if(c.demo||c.classificationPending||c.processingError||c.multiple||!c.pipeline||(c.pairIssue&&supportedBeforePairing.length!==1))reason='Example, unclassified, unprocessed, failed, or unpaired case.';
   else if(c.category!=='BL_COMPARISON'||c.classificationOnly){
    output[id]={category:c.category,status:'OK',review_reason:null,has_defect:false,defect_fields:[]};
    continue;

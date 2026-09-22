@@ -14,11 +14,15 @@ test('clear Jev decisions avoid a second model call',async()=>{
  let calls=0;const p=makeProvider(env,async url=>{calls++;assert.match(url,/typesafe/);return answer()});
  const result=await p.classify(email);assert.equal(result.needsReview,false);assert.equal(result.provider,'jev');assert.equal(calls,1);
 });
-test('uncertainty and contradictory intent fall back independently without anchoring Gemini',async()=>{
- for(const [category,confidence,intent] of [['BL_COMPARISON',.43,.52],['SI_REQUEST',.99,.9],['SI_REQUEST',.99,.5]]){
+test('uncertainty and intent that contradicts a non-document category fall back without anchoring Gemini',async()=>{
+ for(const [category,confidence,intent] of [['BL_COMPARISON',.43,.52],['GENERAL',.99,.9],['INVOICE_QUERY',.99,.5]]){
   const calls=[];const p=makeProvider(env,async(url,opts)=>{calls.push(url);if(url.includes('typesafe'))return answer(category,confidence,intent);const payload=JSON.parse(opts.body);assert.deepEqual(JSON.parse(payload.messages[1].content[0].text),email);return gemini()});
   const result=await p.classify(email);assert.equal(result.category,'SI_REQUEST');assert.equal(result.needsReview,false);assert.equal(result.routingFallback.reason,'uncertain_decision');assert.equal(result.provider,'api');assert.equal(result.routingProvider,'jev');assert.equal(calls.length,2);
  }
+});
+test('a confident SI request can mention the future draft BL without paying for a second classification',async()=>{
+ let calls=0;const p=makeProvider(env,async url=>{calls++;assert.match(url,/typesafe/);return answer('SI_REQUEST',.99,.77)});
+ const result=await p.classify(email);assert.equal(result.category,'SI_REQUEST');assert.equal(result.needsReview,false);assert.equal(result.provider,'jev');assert.equal(calls,1);
 });
 test('Jev overload and malformed answers recover through Gemini',async()=>{
  for(const response of [()=>new Response('',{status:529}),()=>answer('MADE_UP'),()=>answer('SI_REQUEST',null,.1)]){
