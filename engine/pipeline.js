@@ -4,7 +4,7 @@ import {applySourceProfile} from './source-profile.js';
 import {automaticPairEvidence} from './references.js';
 import {contextReadReason} from './review-evidence.js';
 const event=(c,title,detail)=>{c.history.unshift({title,detail,at:new Date().toISOString()})};
-export const PIPELINE_VERSION='glm-primary-2026-09-21-12';
+export const PIPELINE_VERSION='glm-primary-2026-09-22-13';
 export async function runPipeline(original,documents,env={},options={}){
  const c=structuredClone(original),provider=makeProvider(env,options.fetcher),now=new Date().toISOString();
  c.sourceVersions||=[];if(c.pipeline)c.sourceVersions.push({version:c.version,fields:c.fields,docs:(c.docs||[]).map(({pages,...meta})=>meta)});
