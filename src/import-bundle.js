@@ -1,6 +1,15 @@
 import JSZip from 'jszip';
 import {importEmails} from './model.js';
 
+export function emailRowsFromJson(value, name='JSON file'){
+ const rows=Array.isArray(value)?value:value?.emails||value?.records||(
+  value&&typeof value==='object'&&(value.id||value.email_id)&&typeof value.subject==='string'?[value]:null
+ );
+ if(!Array.isArray(rows)||!rows.length)throw Error(`${name} needs one email record or a non-empty array of email records.`);
+ importEmails(rows,'validation');
+ return rows;
+}
+
 // The competition bundle stores one JSON message per file under inbox/.
 export async function emailRowsInArchive(file){
  const zip=await JSZip.loadAsync(file);
@@ -14,6 +23,5 @@ export async function emailRowsInArchive(file){
   if(Array.isArray(row)||!row||typeof row!=='object')throw Error('Each inbox JSON must contain one email record.');
   rows.push(row);
  }
- importEmails(rows,'validation');
- return rows;
+ return emailRowsFromJson(rows,'ZIP inbox');
 }
